@@ -127,6 +127,7 @@ dependencies = [
  "async-stream",
  "axum",
  "futures",
+ "hyper",
  "ndarray",
  "nom",
  "tokio",

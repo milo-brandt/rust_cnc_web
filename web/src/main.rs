@@ -1,7 +1,9 @@
 mod mdc;
+mod debug_page;
 use sycamore::prelude::*;
 
 use reqwasm::websocket::{futures::WebSocket, Message};
+use sycamore_router::HistoryIntegration;
 use wasm_bindgen_futures::spawn_local;
 use futures::stream::StreamExt;
 use futures::channel::oneshot;
@@ -17,7 +19,11 @@ use std::time::Duration;
 
 use sycamore::easing;
 use sycamore::motion::create_tweened_signal;
+use sycamore_router::{Route, Router, RouterProps};
 
+use debug_page::DebugPage;
+
+/*
 #[derive(Debug)]
 enum HandlerMessage {
     Stop,
@@ -198,41 +204,78 @@ fn swoop_signal<'a>(cx: Scope<'a>) -> &'a ReadSignal<f32> {
     signal.set(1.0);
     create_memo(cx, || *signal.get())
 }
+*/
+
+#[derive(Route)]
+enum AppRoutes {
+    #[to("/")]
+    Index,
+    #[to("/page_1")]
+    Page1,
+    #[not_found]
+    NotFound,
+}
 
 #[component]
-fn Appy<'a>(cx: Scope<'a>) -> View<DomNode> {
-    let state = create_signal(cx, false);
-    let toggle = |_| state.set(!*state.get());
-
-    view! { cx,
-        (if *state.get() {
-            view! { cx,
-                TextInput(label="Name here!".to_string())
-                Button { "heyasdfasdfasdfadsfasdfsadf" CircularProgress(density=-6.0, determinate=create_signal(cx, true), progress=swoop_signal(cx)) }
-            }
-        } else {
-            view! { cx,
-                div {
-                    "Nothing here!"
-                }
-            }
-        })
-        button(on:click=toggle) { "toggle!" }
+fn IndexPage(cx: Scope) -> View<DomNode> {
+    view! { cx, 
+        div {
+            "Hello! "
+            //DebugLine(text="hello!".to_string())
+            a(href="/page_1") {
+                "Go to page 1?"
+            }       
+        }
+    }
+}
+#[component]
+fn Page1(cx: Scope) -> View<DomNode> {
+    view! { cx, 
+        div {
+            "Page1!"
+            a(href="/") {
+                "Go home?"
+            }       
+        }
+    }
+}
+#[component]
+fn NotFound(cx: Scope) -> View<DomNode> {
+    view! { cx, 
+        div {
+            "Not found!"
+            a(href="/") {
+                "Go home?"
+            }       
+        }
     }
 }
 
-
-
-
-
 fn main() {
     wasm_logger::init(wasm_logger::Config::default());
-    //let messages = create_rc_signal(vec![]);
-    //let handle = WebSocketHandle::start(messages.clone());
     sycamore::render(|cx| {
         view! { cx,
-            //App(values=messages)
-            Appy
+            Router(
+                integration=HistoryIntegration::new(),
+                view=|cx, route: &ReadSignal<AppRoutes>| {
+                    view! { cx,
+                        div(class="app") {
+                            (match route.get().as_ref() {
+                                AppRoutes::Index => view! { cx,
+                                    IndexPage
+                                },
+                                AppRoutes::Page1 => view! { cx,
+                                    DebugPage
+                                },
+                                AppRoutes::NotFound => view! { cx,
+                                    NotFound
+                                },
+                            })
+                        }
+                    }
+                }
+            )
+        
         }
     });
 }

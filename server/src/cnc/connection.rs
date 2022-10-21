@@ -35,7 +35,6 @@ pub async fn as_terminal<Reader: AsyncRead + Unpin, Writer: AsyncWrite + Unpin>(
             let buffer = BufReader::new(reader);
             let mut lines = buffer.lines();
             while let Ok(Some(line)) = lines.next_line().await {
-                let line = crate::cnc::grbl::parser::parse_grbl_line(&line);
                 println!("line = {:?}", line)
             }
         },
@@ -46,6 +45,29 @@ pub async fn as_terminal<Reader: AsyncRead + Unpin, Writer: AsyncWrite + Unpin>(
                 println!("sending = {}", line);
                 line.push('\n');
                 writer.write(line.as_bytes()).await.unwrap();
+            }
+        }
+    );
+}
+
+
+pub async fn as_fake_terminal<Reader: AsyncRead + Unpin + Send + 'static, Writer: AsyncWrite + Unpin + Send + 'static>(reader: Reader, mut writer: Writer) {
+    let mut machine = crate::cnc::grbl::machine::Machine::new(reader, writer);
+    let mut parsed_receiver = machine.parsed_subscribe();
+    let mut write_sender = machine.get_write_sender();
+    join!(
+        async move {
+            while let Ok(line) = parsed_receiver.recv().await {
+                println!("line = {:?}", line);
+            }
+        },
+        async move {
+            let buffer = BufReader::new(stdin());
+            let mut lines = buffer.lines();
+            while let Ok(Some(mut line)) = lines.next_line().await {
+                println!("sending = {}", line);
+                line.push('\n');
+                write_sender.send(line.as_bytes().to_vec()).await.unwrap();
             }
         }
     );

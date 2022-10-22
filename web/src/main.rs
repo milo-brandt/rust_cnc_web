@@ -1,3 +1,4 @@
+mod utils;
 mod mdc;
 mod debug_page;
 use sycamore::prelude::*;

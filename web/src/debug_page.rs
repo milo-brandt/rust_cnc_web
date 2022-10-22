@@ -13,6 +13,7 @@ use stylist::style;
 use web_sys::{KeyboardEvent, Event};
 use gloo_timers::future::sleep;
 use std::time::Duration;
+use crate::utils::async_sycamore;
 
 #[derive(Prop)]
 pub struct DebugLineProps {
@@ -84,9 +85,8 @@ pub fn DebugPage(cx: Scope) -> View<DomNode> {
     }.expect("CSS should work");
     log::debug!("CSS class: {}", css_style.get_class_name());
     let (stop_send, mut stop_receive) = oneshot::channel::<()>();
-    let message_list = create_rc_signal(vec![]);
+    let (mut message_list_sender, message_list) = async_sycamore::create_channel(cx, vec![]);
     {
-        let message_list = message_list.clone();
         spawn_local(async move {
             let mut ws = WebSocket::open("ws://cnc:3000/debug/listen_raw").unwrap();
             let mut ws_next = ws.next().fuse();
@@ -116,7 +116,7 @@ pub fn DebugPage(cx: Scope) -> View<DomNode> {
                     _ = &mut next_update => {
                         log::debug!("Updating!");
                         pending_update = false;
-                        message_list.set(values.clone());
+                        message_list_sender.set(values.clone());
                     }
                     _ = stop_receive => break
                 }

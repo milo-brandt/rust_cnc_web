@@ -49,7 +49,11 @@ impl Machine {
                         }
                         to_send = write_reader.recv() => {
                             if let Some(mut line) = to_send {
-                                writer.write(&line[..]).await.unwrap();
+                                if line[0] == b'?' {
+                                    writer.write(b"?").await.unwrap();
+                                } else {
+                                    writer.write(&line[..]).await.unwrap();
+                                }
                                 line.pop();
                                 debug_stream.send(MachineDebugEvent::Sent(String::from(from_utf8(&line).unwrap())));
                             }

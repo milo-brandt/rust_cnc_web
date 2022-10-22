@@ -77,9 +77,9 @@ async fn main() {
 
 async fn listen_raw(ws: WebSocketUpgrade, machine: Extension<Arc<Machine>>) -> Response {
     let mut debug_receiver = machine.debug_stream_subscribe();
-    ws.on_upgrade(move |mut socket| async move {
+    ws.on_upgrade(move |socket| async move {
         let (mut writer, mut reader) = socket.split();
-        let (mut closer, mut close_listen) = oneshot::channel::<()>();
+        let (closer, mut close_listen) = oneshot::channel::<()>();
         let (writer, reader) = join! {
             async move {
                 loop {
@@ -104,7 +104,7 @@ async fn listen_raw(ws: WebSocketUpgrade, machine: Extension<Arc<Machine>>) -> R
                 loop {
                     let response = <SplitStream<WebSocket> as StreamExt>::next(&mut reader).await;
                     if let Some(Ok(Message::Close(_))) = response {
-                        closer.send(());
+                        closer.send(()).unwrap();
                         break
                     }
                     if let None = response {

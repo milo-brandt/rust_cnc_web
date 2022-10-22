@@ -58,10 +58,7 @@ pub enum TryReceiverError {
 }
 
 fn subscribe_with_history_count_impl<T>(history: Arc<HistoryRingBuffer<T>>, size: usize) -> Receiver<T> {
-    let (begin_count, end_count) = {
-        let lock = history.inner.read().unwrap();
-        (lock.begin_count, lock.end_count)
-    };
+    let end_count = history.inner.read().unwrap().end_count;
     let true_size = min(end_count, size);
     let next_count = end_count - true_size;
     Receiver {
@@ -120,7 +117,7 @@ impl<T> Drop for Sender<T> {
 impl<T: Clone + Send> Receiver<T> {
     pub fn try_recv(&mut self) -> Result<T, TryReceiverError> {
         let history = &*self.state;
-        let mut lock = history.inner.read().unwrap();
+        let lock = history.inner.read().unwrap();
         if lock.begin_count > self.next_count {
             let difference = lock.begin_count - self.next_count;
             self.next_count = lock.begin_count;
@@ -148,7 +145,7 @@ impl<T: Clone + Send> Receiver<T> {
                 Err(TryReceiverError::Empty) => {
                     let notified = {
                         let history = &*self.state;
-                        let mut lock = history.inner.read().unwrap();
+                        let lock = history.inner.read().unwrap();
                         if self.next_count >= lock.end_count {
                             Some(history.on_next.notified())
                         } else {

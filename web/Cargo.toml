@@ -17,3 +17,4 @@ wasm-logger = "0.2"
 web-sys = "0.3"
 stylist = "0.10"
 console_error_panic_hook = "0.1"
+gloo-timers = {version="0.2", features=["futures"]}

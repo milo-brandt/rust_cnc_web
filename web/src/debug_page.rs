@@ -11,6 +11,8 @@ use futures::channel::oneshot;
 use futures::{select, FutureExt};
 use stylist::style;
 use web_sys::{KeyboardEvent, Event};
+use gloo_timers::future::sleep;
+use std::time::Duration;
 
 #[derive(Prop)]
 pub struct DebugLineProps {
@@ -88,6 +90,10 @@ pub fn DebugPage(cx: Scope) -> View<DomNode> {
         spawn_local(async move {
             let mut ws = WebSocket::open("ws://cnc:3000/debug/listen_raw").unwrap();
             let mut ws_next = ws.next().fuse();
+            let mut values = vec![];
+            let mut next_update = sleep(Duration::from_millis(0)).fuse();
+            let mut pending_update = false;
+            (&mut next_update).await;
             loop {
                 select! {
                     next_message = ws_next => {
@@ -95,15 +101,22 @@ pub fn DebugPage(cx: Scope) -> View<DomNode> {
                         match next_message {
                             Some(Ok(Message::Text(ws_message))) => {
                                 log::debug!("Received: {:?}", ws_message);
-                                let mut v = (*message_list.get()).clone();
-                                v.push(ws_message);
-                                message_list.set(v);
+                                values.push(ws_message);
+                                if !pending_update {
+                                    pending_update = true;
+                                    next_update = sleep(Duration::from_millis(10)).fuse();
+                                }
                             }
                             Some(_) => {
                                 log::debug!("Received: ???");
                             }
                             None => break
                         }
+                    },
+                    _ = &mut next_update => {
+                        log::debug!("Updating!");
+                        pending_update = false;
+                        message_list.set(values.clone());
                     }
                     _ = stop_receive => break
                 }

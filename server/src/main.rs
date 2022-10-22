@@ -85,11 +85,11 @@ async fn listen_raw(ws: WebSocketUpgrade, machine: Extension<Arc<Machine>>) -> R
             async move {
                 loop {
                     let (is_output, value) = select! {
-                        input = input_receiver.recv() => (false, input),
-                        output = output_receiver.recv() => (true, output),
+                        input = input_receiver.recv() => (false, input.unwrap()),
+                        output = output_receiver.recv() => (true, output.unwrap()),
                         _ = &mut close_listen => break
                     };
-                    if let Ok(string) = value {
+                    if let string = value {
                         let prefix = if is_output { "> " } else { "< " };
                         if let Err(_) = writer.send(Message::Text(format!("{}{}", prefix, string))).await {
                             break

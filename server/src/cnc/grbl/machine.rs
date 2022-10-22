@@ -14,14 +14,14 @@ use tokio::{
     task::JoinHandle,
     spawn
 };
-use crate::util::historical_broadcast::{HistoricalBroadcast, HistoricalBroadcastReceiver};
+use crate::util::history_broadcast;
 use super::messages::{
     GrblState, GrblPosition, GrblStatus, GrblMessage
 };
 use std::str::from_utf8;
 
 pub struct Machine {
-    raw_input: HistoricalBroadcast<String>,
+    raw_input: history_broadcast::Receiver<String>,
     raw_output: broadcast::Sender<String>,
     parsed_input: broadcast::Sender<GrblMessage>,
     write_sender: mpsc::Sender<Vec<u8>>,
@@ -30,11 +30,11 @@ pub struct Machine {
 }
 impl Machine {
     pub fn new<Reader: AsyncRead + Unpin + Send + 'static, Writer: AsyncWrite + Unpin + Send + 'static>(reader: Reader, mut writer: Writer) -> Self {
-        let raw_input = HistoricalBroadcast::new();
+        let mut raw_input = history_broadcast::Sender::<String>::new(256);
+        let raw_input_receiver = raw_input.subscribe_with_history_count(0);
         let (raw_output, _) = broadcast::channel(1024);
         let (parsed_input, _) = broadcast::channel(1024);
         let read_task = {
-            let mut raw_input = raw_input.clone();
             let mut parsed_input = parsed_input.clone();
             spawn(async move {
                 let buffer = BufReader::new(reader);
@@ -58,11 +58,11 @@ impl Machine {
             })
         };
         Machine {
-            raw_input, raw_output, parsed_input, write_sender, read_task, write_task
+            raw_input: raw_input_receiver, raw_output, parsed_input, write_sender, read_task, write_task
         }
     }
-    pub fn raw_input_subscribe(&self) -> HistoricalBroadcastReceiver<String> {
-        self.raw_input.subscribe()
+    pub fn raw_input_subscribe(&self) -> history_broadcast::Receiver<String> {
+        self.raw_input.subscribe_with_history_count(128)
     }
     pub fn raw_output_subscribe(&self) -> broadcast::Receiver<String> {
         self.raw_output.subscribe()

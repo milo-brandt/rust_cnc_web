@@ -21,7 +21,7 @@ use tokio::sync::oneshot;
 use futures::sink::SinkExt;
 use tokio::sync::broadcast;
 use futures::future::FutureExt;
-use cnc::grbl::machine::Machine;
+use cnc::grbl::machine::{Machine, MachineDebugEvent};
 use std::sync::Arc;
 use std::str::from_utf8;
 use tokio::select;
@@ -76,24 +76,25 @@ async fn main() {
 } */
 
 async fn listen_raw(ws: WebSocketUpgrade, machine: Extension<Arc<Machine>>) -> Response {
-    let mut input_receiver = machine.raw_input_subscribe();
-    let mut output_receiver = machine.raw_output_subscribe();
+    let mut debug_receiver = machine.debug_stream_subscribe();
     ws.on_upgrade(move |mut socket| async move {
         let (mut writer, mut reader) = socket.split();
         let (mut closer, mut close_listen) = oneshot::channel::<()>();
         let (writer, reader) = join! {
             async move {
                 loop {
-                    let (is_output, value) = select! {
-                        input = input_receiver.recv() => (false, input.unwrap()),
-                        output = output_receiver.recv() => (true, output.unwrap()),
-                        _ = &mut close_listen => break
-                    };
-                    if let string = value {
-                        let prefix = if is_output { "> " } else { "< " };
-                        if let Err(_) = writer.send(Message::Text(format!("{}{}", prefix, string))).await {
-                            break
+                    select! {
+                        event = debug_receiver.recv() => {
+                            let event = event.unwrap();
+                            let message = match event {
+                                MachineDebugEvent::Sent(str) => format!("> {}", str),
+                                MachineDebugEvent::Received(str) => format!("< {}", str),
+                            };
+                            if let Err(_) = writer.send(Message::Text(message)).await {
+                                break
+                            }
                         }
+                        _ = &mut close_listen => break
                     }
                 }
                 writer

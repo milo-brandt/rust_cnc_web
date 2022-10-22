@@ -50,7 +50,7 @@ pub async fn as_terminal<Reader: AsyncRead + Unpin, Writer: AsyncWrite + Unpin>(
     );
 }
 
-
+/*
 pub async fn as_fake_terminal<Reader: AsyncRead + Unpin + Send + 'static, Writer: AsyncWrite + Unpin + Send + 'static>(reader: Reader, mut writer: Writer) {
     let mut machine = crate::cnc::grbl::machine::Machine::new(reader, writer);
     let mut parsed_receiver = machine.parsed_subscribe();
@@ -72,7 +72,7 @@ pub async fn as_fake_terminal<Reader: AsyncRead + Unpin + Send + 'static, Writer
         }
     );
 }
-
+*/
 
 //     let (mut reader, mut writer) = split(port);
 //     join!(

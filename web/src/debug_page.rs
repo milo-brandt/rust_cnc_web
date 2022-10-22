@@ -1,6 +1,7 @@
 use std::mem::forget;
 use std::sync::Arc;
 
+use futures::future::Fuse;
 use reqwasm::websocket::{futures::WebSocket, Message};
 use reqwasm::http::Request;
 use sycamore::prelude::*;
@@ -84,16 +85,14 @@ pub fn DebugPage(cx: Scope) -> View<DomNode> {
     "#
     }.expect("CSS should work");
     log::debug!("CSS class: {}", css_style.get_class_name());
-    let (stop_send, mut stop_receive) = oneshot::channel::<()>();
     let (mut message_list_sender, message_list) = async_sycamore::create_channel(cx, vec![]);
     {
-        spawn_local(async move {
+        async_sycamore::spawn_local_drop_with_context(cx, async move {
             let mut ws = WebSocket::open("ws://cnc:3000/debug/listen_raw").unwrap();
             let mut ws_next = ws.next().fuse();
             let mut values = vec![];
-            let mut next_update = sleep(Duration::from_millis(0)).fuse();
+            let mut next_update = Fuse::terminated(); //sleep(Duration::from_millis(0)).fuse();
             let mut pending_update = false;
-            (&mut next_update).await;
             loop {
                 select! {
                     next_message = ws_next => {
@@ -118,7 +117,6 @@ pub fn DebugPage(cx: Scope) -> View<DomNode> {
                         pending_update = false;
                         message_list_sender.set(values.clone());
                     }
-                    _ = stop_receive => break
                 }
             }
             log::debug!("Closing!");
@@ -135,7 +133,6 @@ pub fn DebugPage(cx: Scope) -> View<DomNode> {
         v.reverse();
         v
     });
-    on_cleanup(cx, move || drop(stop_send.send(())));
     let input_value = create_signal(cx, String::new());
     let keydown_handler = |event: Event| {
         let keyboard_event: KeyboardEvent = event.unchecked_into();

@@ -8,7 +8,7 @@ pub enum RealtimeCommand {
     FeedOverridePlusTen = 0x91,
     FeedOverrideMinusTen = 0x92,
     FeedOverridePlusOne = 0x93,
-    FeedOvrerideMinusOne = 0x94,
+    FeedOverrideMinusOne = 0x94,
     RapidOverrideReset = 0x95,
     RapidOverrideHalf = 0x96,
     RapidOverrideQuarter = 0x97,

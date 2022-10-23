@@ -34,7 +34,7 @@ pub fn spawn_local_drop_with_context<'a, F: Future<Output=()> + 'static>(cx: Sco
     //NOTE: This assumes the context can't drop *while* running the future.
     let shared = Rc::new(LocalFutureSharedState{ future: RefCell::new(Some(future)) });
     let shared_clone = shared.clone();
-    on_cleanup(cx, move || unsafe { *shared_clone.future.borrow_mut() = None; });
+    on_cleanup(cx, move || *shared_clone.future.borrow_mut() = None);
     spawn_local(LocalFuture{ shared });
 }
 

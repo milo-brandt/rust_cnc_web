@@ -1,17 +1,12 @@
 use {
     super::{
-        AxisValues, CoordinateMode, CoordinateSystem, GCodeCommand, GCodeLine, GCodeModal,
-        MoveMode, OffsetAxisValues, Orientation, Plane, ProbeDirection, ProbeRequirement,
-        SpindleMode, Unit,
+        AxisValues, CoordinateMode, CoordinateSystem, GCodeCommand, GCodeFormatSpecification,
+        GCodeLine, GCodeModal, MoveMode, OffsetAxisValues, Orientation, Plane, ProbeDirection,
+        ProbeRequirement, SpindleMode, Unit,
     },
     std::fmt::Display,
 };
 
-pub struct GCodeFormatSettings {
-    axis_letters: Vec<u8>,
-    offset_axis_letters: Vec<u8>,
-    float_digits: usize,
-}
 struct GCodeAxisPrinter<'a> {
     float_digits: usize,
     axis_letters: &'a Vec<u8>,
@@ -63,7 +58,7 @@ impl<'a> Display for GCodeModalPrinter<'a> {
     }
 }
 struct GCodeCommandPrinter<'a> {
-    settings: &'a GCodeFormatSettings,
+    settings: &'a GCodeFormatSpecification,
     command: &'a GCodeCommand,
 }
 impl<'a> Display for GCodeCommandPrinter<'a> {
@@ -121,7 +116,7 @@ impl<'a> Display for GCodeCommandPrinter<'a> {
     }
 }
 struct GCodeLinePrinter<'a> {
-    settings: &'a GCodeFormatSettings,
+    settings: &'a GCodeFormatSpecification,
     line: &'a GCodeLine,
 }
 impl<'a> Display for GCodeLinePrinter<'a> {
@@ -146,7 +141,7 @@ impl<'a> Display for GCodeLinePrinter<'a> {
         Ok(())
     }
 }
-impl GCodeFormatSettings {
+impl GCodeFormatSpecification {
     fn format_axes<'a>(&'a self, values: &'a AxisValues) -> impl Display + 'a {
         GCodeAxisPrinter {
             float_digits: self.float_digits,
@@ -187,8 +182,8 @@ impl GCodeFormatSettings {
 mod test {
     use {super::*, std::string::ToString};
 
-    fn default_settings() -> GCodeFormatSettings {
-        GCodeFormatSettings {
+    fn default_settings() -> GCodeFormatSpecification {
+        GCodeFormatSpecification {
             axis_letters: b"XYZA".to_vec(),
             offset_axis_letters: b"IJK".to_vec(),
             float_digits: 2,

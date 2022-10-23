@@ -130,3 +130,8 @@ impl GCodeLine {
         true
     }
 }
+pub struct GCodeFormatSpecification {
+    axis_letters: Vec<u8>,
+    offset_axis_letters: Vec<u8>,
+    float_digits: usize,
+}

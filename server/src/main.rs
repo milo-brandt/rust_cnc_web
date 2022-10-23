@@ -3,28 +3,24 @@
 mod cnc;
 mod util;
 use axum::{
-    routing::{get, post},
-    Router,
-    response::Response,
-    Extension,
+    extract::ws::{Message, WebSocket, WebSocketUpgrade},
     extract::RawBody,
-    extract::ws::{WebSocketUpgrade, WebSocket, Message},
+    response::Response,
+    routing::{get, post},
+    Extension, Router,
 };
 use tower_http::cors::{Any, CorsLayer};
 
-
-
-use futures::{stream::{StreamExt}};
+use futures::sink::SinkExt;
+use futures::stream::StreamExt;
 use tokio::join;
 use tokio::sync::oneshot;
-use futures::sink::SinkExt;
-
 
 use cnc::grbl::machine::{Machine, MachineDebugEvent};
-use std::sync::Arc;
-use std::str::from_utf8;
-use tokio::select;
 use futures::stream::SplitStream;
+use std::str::from_utf8;
+use std::sync::Arc;
+use tokio::select;
 
 #[tokio::main]
 async fn main() {
@@ -33,10 +29,11 @@ async fn main() {
         .allow_methods(Any)
         // allow requests from any origin... should maybe read in config
         .allow_origin(Any);
-        // We should probably add some other authentication?
-        // Maybe a header-to-cookie sort of deal?
-        // Or double submit cookie?
-    let (reader, writer) = cnc::connection::open_and_reset_arduino_like_serial("/dev/ttyUSB0").await;
+    // We should probably add some other authentication?
+    // Maybe a header-to-cookie sort of deal?
+    // Or double submit cookie?
+    let (reader, writer) =
+        cnc::connection::open_and_reset_arduino_like_serial("/dev/ttyUSB0").await;
     let machine = Machine::new(reader, writer);
     // build our application with a single route
     let app = Router::new()

@@ -1,19 +1,10 @@
-use tokio::{
-    sync::{
-        mpsc,
-    },
-    io::{
-        AsyncWrite,
-        AsyncRead,
-        AsyncWriteExt,
-        BufReader,
-        AsyncBufReadExt,
-    },
-    task::JoinHandle,
-    spawn,
-    select
-};
 use crate::util::history_broadcast;
+use tokio::{
+    io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader},
+    select, spawn,
+    sync::mpsc,
+    task::JoinHandle,
+};
 
 use std::str::from_utf8;
 
@@ -28,7 +19,13 @@ pub struct Machine {
     handler_task: JoinHandle<()>,
 }
 impl Machine {
-    pub fn new<Reader: AsyncRead + Unpin + Send + 'static, Writer: AsyncWrite + Unpin + Send + 'static>(reader: Reader, mut writer: Writer) -> Self {
+    pub fn new<
+        Reader: AsyncRead + Unpin + Send + 'static,
+        Writer: AsyncWrite + Unpin + Send + 'static,
+    >(
+        reader: Reader,
+        mut writer: Writer,
+    ) -> Self {
         let mut debug_stream = history_broadcast::Sender::<MachineDebugEvent>::new(64);
         let debug_stream_receiver = debug_stream.subscribe_with_history_count(0);
         let (write_sender, mut write_reader) = mpsc::channel::<Vec<u8>>(1024);
@@ -59,7 +56,9 @@ impl Machine {
             })
         };
         Machine {
-            debug_stream_receiver, write_sender, handler_task
+            debug_stream_receiver,
+            write_sender,
+            handler_task,
         }
     }
     pub fn debug_stream_subscribe(&self) -> history_broadcast::Receiver<MachineDebugEvent> {

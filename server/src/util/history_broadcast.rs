@@ -1,18 +1,15 @@
-use std::{mem::MaybeUninit, sync::{Arc, RwLock}, alloc::{alloc, Layout}};
 use std::cmp::min;
-
+use std::{
+    alloc::{alloc, Layout},
+    mem::MaybeUninit,
+    sync::{Arc, RwLock},
+};
 
 use tokio::sync::Notify;
 
 fn make_vec_uninit<T>(size: usize) -> Vec<MaybeUninit<T>> {
     let layout = Layout::array::<T>(size).unwrap();
-    unsafe {
-        Vec::from_raw_parts(
-            alloc(layout) as *mut MaybeUninit<T>,
-            size,
-            size
-        )
-    }
+    unsafe { Vec::from_raw_parts(alloc(layout) as *mut MaybeUninit<T>, size, size) }
 }
 
 struct HistoryRingBufferInner<T> {
@@ -28,45 +25,47 @@ impl<T> Drop for HistoryRingBufferInner<T> {
             unsafe {
                 self.storage[index].assume_init_drop();
             }
-        }        
+        }
     }
 }
 struct HistoryRingBuffer<T> {
     inner: RwLock<HistoryRingBufferInner<T>>,
     capacity: usize,
-    on_next: Notify
+    on_next: Notify,
 }
 pub struct Sender<T> {
     //could copy end_count out here; this controls state
-    state: Arc<HistoryRingBuffer<T>>
+    state: Arc<HistoryRingBuffer<T>>,
 }
 #[derive(Clone)]
 pub struct Receiver<T> {
     next_count: usize,
-    state: Arc<HistoryRingBuffer<T>>
+    state: Arc<HistoryRingBuffer<T>>,
 }
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum ReceiverError {
     Lagged(usize),
-    Closed
+    Closed,
 }
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum TryReceiverError {
     Empty,
     Lagged(usize),
-    Closed
+    Closed,
 }
 
-fn subscribe_with_history_count_impl<T>(history: Arc<HistoryRingBuffer<T>>, size: usize) -> Receiver<T> {
+fn subscribe_with_history_count_impl<T>(
+    history: Arc<HistoryRingBuffer<T>>,
+    size: usize,
+) -> Receiver<T> {
     let end_count = history.inner.read().unwrap().end_count;
     let true_size = min(end_count, size);
     let next_count = end_count - true_size;
     Receiver {
         next_count,
-        state: history
+        state: history,
     }
 }
-
 
 impl<T: Clone + Send> Sender<T> {
     pub fn new(size: usize) -> Self {
@@ -80,7 +79,7 @@ impl<T: Clone + Send> Sender<T> {
                 }),
                 capacity: size,
                 on_next: Notify::new(),
-            })
+            }),
         }
     }
     pub fn send(&mut self, value: T) {
@@ -131,9 +130,7 @@ impl<T: Clone + Send> Receiver<T> {
         } else {
             let index = self.next_count % history.capacity;
             self.next_count += 1;
-            unsafe {
-                Ok(lock.storage[index].assume_init_ref().clone())
-            }
+            unsafe { Ok(lock.storage[index].assume_init_ref().clone()) }
         }
     }
     pub async fn recv(&mut self) -> Result<T, ReceiverError> {
@@ -164,7 +161,7 @@ impl<T: Clone + Send> Receiver<T> {
     }
 }
 #[cfg(test)]
-mod test{
+mod test {
     use super::*;
 
     #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -193,26 +190,26 @@ mod test{
         }
         assert_eq!(receiver_2.try_recv(), Err(TryReceiverError::Lagged(12)));
         for i in 12..16 {
-            assert_eq!(receiver_2.try_recv(), Ok(i));            
+            assert_eq!(receiver_2.try_recv(), Ok(i));
         }
 
         let mut receiver_3 = sender.subscribe_with_history_count(100);
         assert_eq!(receiver_3.try_recv(), Err(TryReceiverError::Lagged(12)));
         for i in 12..16 {
-            assert_eq!(receiver_3.try_recv(), Ok(i));            
+            assert_eq!(receiver_3.try_recv(), Ok(i));
         }
 
         let mut receiver_4 = sender.subscribe_with_history_count(4);
         for i in 12..16 {
-            assert_eq!(receiver_4.try_recv(), Ok(i));            
+            assert_eq!(receiver_4.try_recv(), Ok(i));
         }
 
         let mut receiver_5 = sender.subscribe_with_history_count(2);
         for i in 14..16 {
-            assert_eq!(receiver_5.try_recv(), Ok(i));            
+            assert_eq!(receiver_5.try_recv(), Ok(i));
         }
     }
-    
+
     #[test]
     fn test_send() {
         fn is_send<T: Send>() {}

@@ -11,12 +11,12 @@ pub enum GrblState {
     Door(i64),
     Check,
     Home,
-    Sleep
+    Sleep,
 }
 #[derive(Debug, Clone, PartialEq)]
 pub enum GrblPosition {
     Machine(Array1<f64>),
-    Work(Array1<f64>)
+    Work(Array1<f64>),
 }
 #[derive(Debug, Clone, PartialEq)]
 pub struct GrblStatus {
@@ -51,7 +51,7 @@ impl GrblStatus {
             rapid_override: None,
             spindle_override: None,
             accessory_state: None,
-            unknown_terms: Vec::new()
+            unknown_terms: Vec::new(),
         }
     }
 }

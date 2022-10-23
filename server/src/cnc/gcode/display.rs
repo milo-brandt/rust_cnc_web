@@ -1,30 +1,18 @@
-use std::fmt::Display;
 use super::{
-    GCodeCommand,
-    GCodeLine,
-    GCodeModal,
-    Orientation,
-    Plane,
-    Unit,
-    CoordinateSystem,
-    CoordinateMode,
-    SpindleMode,
-    MoveMode,
-    AxisValues,
-    OffsetAxisValues,
-    ProbeDirection,
-    ProbeRequirement
+    AxisValues, CoordinateMode, CoordinateSystem, GCodeCommand, GCodeLine, GCodeModal, MoveMode,
+    OffsetAxisValues, Orientation, Plane, ProbeDirection, ProbeRequirement, SpindleMode, Unit,
 };
+use std::fmt::Display;
 
 pub struct GCodeFormatSettings {
     axis_letters: Vec<u8>,
     offset_axis_letters: Vec<u8>,
-    float_digits: usize
+    float_digits: usize,
 }
 struct GCodeAxisPrinter<'a> {
     float_digits: usize,
     axis_letters: &'a Vec<u8>,
-    axis_info: &'a Vec<(usize, f64)>
+    axis_info: &'a Vec<(usize, f64)>,
 }
 impl<'a> Display for GCodeAxisPrinter<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -35,14 +23,18 @@ impl<'a> Display for GCodeAxisPrinter<'a> {
             } else {
                 write!(f, " ")?;
             }
-            write!(f, "{}{:.2$}", self.axis_letters[*index] as char, value, self.float_digits)?;
+            write!(
+                f,
+                "{}{:.2$}",
+                self.axis_letters[*index] as char, value, self.float_digits
+            )?;
         }
         Ok(())
     }
 }
 struct GCodeModalPrinter<'a> {
     float_digits: usize,
-    modal: &'a GCodeModal
+    modal: &'a GCodeModal,
 }
 impl<'a> Display for GCodeModalPrinter<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -63,7 +55,7 @@ impl<'a> Display for GCodeModalPrinter<'a> {
             GCodeModal::SetCoordinateMode(CoordinateMode::Incremental) => write!(f, "G91"),
             GCodeModal::SetSpindle(SpindleMode::Clockwise) => write!(f, "M3"),
             GCodeModal::SetSpindle(SpindleMode::Off) => write!(f, "M5"),
-            GCodeModal::EndProgram => write!(f, "M2")                                                
+            GCodeModal::EndProgram => write!(f, "M2"),
         }
     }
 }
@@ -81,13 +73,20 @@ impl<'a> Display for GCodeCommandPrinter<'a> {
                     MoveMode::Unspecified => (),
                 };
                 self.settings.format_axes(position).fmt(f)
-            },
-            GCodeCommand::ArcMove { orientation, position, offsets, revolutions } => {
+            }
+            GCodeCommand::ArcMove {
+                orientation,
+                position,
+                offsets,
+                revolutions,
+            } => {
                 match orientation {
                     Orientation::Clockwise => write!(f, "G2 ")?,
-                    Orientation::Counterclockwise => write!(f, "G3 ")?
+                    Orientation::Counterclockwise => write!(f, "G3 ")?,
                 };
-                write!(f, "{} {}",
+                write!(
+                    f,
+                    "{} {}",
                     self.settings.format_axes(position),
                     self.settings.format_offset_axes(offsets)
                 )?;
@@ -95,16 +94,18 @@ impl<'a> Display for GCodeCommandPrinter<'a> {
                     write!(f, "P{}", revolutions)?;
                 }
                 Ok(())
-            },
+            }
             GCodeCommand::Dwell { duration } => {
                 write!(f, "G4 {:1$}", duration, self.settings.float_digits)
-            },
+            }
             GCodeCommand::SetWorkCoordinateTo(coordinates) => {
-                write!(f, "G10 L20 {}",
-                    self.settings.format_axes(coordinates)
-                )
-            },
-            GCodeCommand::Probe { position, mode, requirement } => {
+                write!(f, "G10 L20 {}", self.settings.format_axes(coordinates))
+            }
+            GCodeCommand::Probe {
+                position,
+                mode,
+                requirement,
+            } => {
                 let subcommand = match (mode, requirement) {
                     (ProbeDirection::Towards, ProbeRequirement::Require) => "G38.2",
                     (ProbeDirection::Towards, ProbeRequirement::Optional) => "G38.3",
@@ -160,19 +161,19 @@ impl GCodeFormatSettings {
     fn format_modal<'a>(&'a self, modal: &'a GCodeModal) -> impl Display + 'a {
         GCodeModalPrinter {
             float_digits: self.float_digits,
-            modal
+            modal,
         }
     }
     fn format_command<'a>(&'a self, command: &'a GCodeCommand) -> impl Display + 'a {
         GCodeCommandPrinter {
             settings: self,
-            command
+            command,
         }
     }
     fn format_line<'a>(&'a self, line: &'a GCodeLine) -> impl Display + 'a {
         GCodeLinePrinter {
             settings: self,
-            line
+            line,
         }
     }
 }
@@ -198,18 +199,11 @@ mod test {
     #[test]
     fn test_simple_line() {
         let line = GCodeLine {
-            modals: vec![
-                GCodeModal::SetFeedrate(1000.0),
-            ],
-            command: Some(
-                GCodeCommand::Move {
-                    mode: MoveMode::Controlled,
-                    position: AxisValues(vec![
-                        (0, 50.002),
-                        (1, 12.5)
-                    ])
-                }
-            )
+            modals: vec![GCodeModal::SetFeedrate(1000.0)],
+            command: Some(GCodeCommand::Move {
+                mode: MoveMode::Controlled,
+                position: AxisValues(vec![(0, 50.002), (1, 12.5)]),
+            }),
         };
         assert_eq!(line_to_string(&line), "F1000.00 G1 X50.00 Y12.50");
     }
@@ -217,25 +211,18 @@ mod test {
     fn test_no_modal_line() {
         let line = GCodeLine {
             modals: vec![],
-            command: Some(
-                GCodeCommand::Move {
-                    mode: MoveMode::Rapid,
-                    position: AxisValues(vec![
-                        (0, 0.0),
-                        (2, -1.0/3.0)
-                    ])
-                }
-            )
+            command: Some(GCodeCommand::Move {
+                mode: MoveMode::Rapid,
+                position: AxisValues(vec![(0, 0.0), (2, -1.0 / 3.0)]),
+            }),
         };
         assert_eq!(line_to_string(&line), "G0 X0.00 Z-0.33");
     }
     #[test]
     fn test_no_command_line() {
         let line = GCodeLine {
-            modals: vec![
-                GCodeModal::SetUnits(Unit::Millimeter)
-            ],
-            command: None
+            modals: vec![GCodeModal::SetUnits(Unit::Millimeter)],
+            command: None,
         };
         assert_eq!(line_to_string(&line), "G21");
     }
@@ -246,7 +233,7 @@ mod test {
                 GCodeModal::SetUnits(Unit::Millimeter),
                 GCodeModal::SetArcPlane(Plane::YZ),
             ],
-            command: None
+            command: None,
         };
         assert_eq!(line_to_string(&line), "G21 G19");
     }

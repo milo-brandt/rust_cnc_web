@@ -1,18 +1,15 @@
-
-use tokio_serial::{self, FlowControl, DataBits, Parity, StopBits, SerialPortBuilderExt, SerialPort};
 use std::time::Duration;
 use tokio::{
-    time::sleep,
-    io::{
-        AsyncWrite,
-        AsyncRead,
-        split,
-    },
     io::stdin,
-    io::BufReader,
     io::AsyncBufReadExt,
     io::AsyncWriteExt,
-    join
+    io::BufReader,
+    io::{split, AsyncRead, AsyncWrite},
+    join,
+    time::sleep,
+};
+use tokio_serial::{
+    self, DataBits, FlowControl, Parity, SerialPort, SerialPortBuilderExt, StopBits,
 };
 
 pub async fn open_and_reset_arduino_like_serial(path: &str) -> (impl AsyncRead, impl AsyncWrite) {
@@ -22,13 +19,18 @@ pub async fn open_and_reset_arduino_like_serial(path: &str) -> (impl AsyncRead, 
         .timeout(Duration::from_millis(30))
         .parity(Parity::None)
         .stop_bits(StopBits::One)
-        .open_native_async().expect("failed to open serial port :(");
+        .open_native_async()
+        .expect("failed to open serial port :(");
     port.write_data_terminal_ready(false).expect("reset things");
     sleep(Duration::from_millis(2)).await;
-    port.write_data_terminal_ready(true).expect("re-reset things");
+    port.write_data_terminal_ready(true)
+        .expect("re-reset things");
     split(port)
 }
-pub async fn as_terminal<Reader: AsyncRead + Unpin, Writer: AsyncWrite + Unpin>(reader: Reader, mut writer: Writer) {
+pub async fn as_terminal<Reader: AsyncRead + Unpin, Writer: AsyncWrite + Unpin>(
+    reader: Reader,
+    mut writer: Writer,
+) {
     join!(
         async move {
             let buffer = BufReader::new(reader);

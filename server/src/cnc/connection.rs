@@ -1,4 +1,4 @@
-use futures::future::select;
+
 use tokio_serial::{self, FlowControl, DataBits, Parity, StopBits, SerialPortBuilderExt, SerialPort};
 use std::time::Duration;
 use tokio::{
@@ -12,7 +12,6 @@ use tokio::{
     io::BufReader,
     io::AsyncBufReadExt,
     io::AsyncWriteExt,
-    task::JoinHandle,
     join
 };
 
@@ -44,7 +43,7 @@ pub async fn as_terminal<Reader: AsyncRead + Unpin, Writer: AsyncWrite + Unpin>(
             while let Ok(Some(mut line)) = lines.next_line().await {
                 println!("sending = {}", line);
                 line.push('\n');
-                writer.write(line.as_bytes()).await.unwrap();
+                writer.write_all(line.as_bytes()).await.unwrap();
             }
         }
     );

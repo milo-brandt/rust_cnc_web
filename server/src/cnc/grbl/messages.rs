@@ -55,6 +55,7 @@ impl GrblStatus {
         }
     }
 }
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum GrblMessage {
     ProbeEvent {

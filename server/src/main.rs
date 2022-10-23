@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 mod cnc;
 mod util;
 use axum::{
@@ -5,22 +7,19 @@ use axum::{
     Router,
     response::Response,
     Extension,
-    response::sse::{Event, KeepAlive, Sse},
-    extract::Path,
-    extract::Json,
     extract::RawBody,
     extract::ws::{WebSocketUpgrade, WebSocket, Message},
 };
 use tower_http::cors::{Any, CorsLayer};
-use async_stream::stream;
-use std::{time::Duration, convert::Infallible};
-use tokio_stream::StreamExt as _ ;
-use futures::{stream::{self, Stream, StreamExt}};
+
+
+
+use futures::{stream::{StreamExt}};
 use tokio::join;
 use tokio::sync::oneshot;
 use futures::sink::SinkExt;
-use tokio::sync::broadcast;
-use futures::future::FutureExt;
+
+
 use cnc::grbl::machine::{Machine, MachineDebugEvent};
 use std::sync::Arc;
 use std::str::from_utf8;
@@ -90,7 +89,7 @@ async fn listen_raw(ws: WebSocketUpgrade, machine: Extension<Arc<Machine>>) -> R
                                 MachineDebugEvent::Sent(str) => format!("> {}", str),
                                 MachineDebugEvent::Received(str) => format!("< {}", str),
                             };
-                            if let Err(_) = writer.send(Message::Text(message)).await {
+                            if writer.send(Message::Text(message)).await.is_err() {
                                 break
                             }
                         }
@@ -107,7 +106,7 @@ async fn listen_raw(ws: WebSocketUpgrade, machine: Extension<Arc<Machine>>) -> R
                         closer.send(()).unwrap();
                         break
                     }
-                    if let None = response {
+                    if response.is_none() {
                         break
                     }
                 }

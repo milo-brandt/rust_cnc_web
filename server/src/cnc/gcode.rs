@@ -1,7 +1,7 @@
-use std::fmt::Display;
 
-use ndarray::prelude::*;
-use ndarray::Array1;
+
+
+
 pub mod display;
 pub mod parser;
 
@@ -88,15 +88,14 @@ pub struct GCodeLine {
 }
 impl GCodeModal {
     fn same_group(lhs: &GCodeModal, rhs: &GCodeModal) -> bool {
-        match (lhs, rhs) {
-            (GCodeModal::SetFeedrate(_), GCodeModal::SetFeedrate(_)) => true,
-            (GCodeModal::SetArcPlane(_), GCodeModal::SetArcPlane(_)) => true,
-            (GCodeModal::SetCoordinateSystem(_), GCodeModal::SetCoordinateSystem(_)) => true,
-            (GCodeModal::SetCoordinateMode(_), GCodeModal::SetCoordinateMode(_)) => true,
-            (GCodeModal::SetSpindle(_), GCodeModal::SetSpindle(_)) => true,
-            (GCodeModal::EndProgram, GCodeModal::EndProgram) => true,
-            _ => false            
-        }
+        matches!((lhs, rhs),
+            (GCodeModal::SetFeedrate(_), GCodeModal::SetFeedrate(_))
+            | (GCodeModal::SetArcPlane(_), GCodeModal::SetArcPlane(_))
+            | (GCodeModal::SetCoordinateSystem(_), GCodeModal::SetCoordinateSystem(_))
+            | (GCodeModal::SetCoordinateMode(_), GCodeModal::SetCoordinateMode(_))
+            | (GCodeModal::SetSpindle(_), GCodeModal::SetSpindle(_))
+            | (GCodeModal::EndProgram, GCodeModal::EndProgram)
+        )
     }
 }
 impl GCodeLine {
@@ -108,6 +107,6 @@ impl GCodeLine {
                 }
             }
         }
-        return true;
+        true
     }
 }

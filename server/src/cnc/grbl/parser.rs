@@ -22,7 +22,6 @@ use nom::{
     self,
     Parser,
     IResult,
-    error::ErrorKind,
     bytes::complete::{
         take_while, tag
     },
@@ -33,7 +32,8 @@ use nom::{
 use std::num::ParseFloatError;
 use std::num::ParseIntError;
 use super::messages::*;
-use ndarray::prelude::*;
+#[allow(unused_imports)] // This is used? Clippy thinks it's not for some reason
+use ndarray::array;
 use ndarray::Array1;
 
 
@@ -371,7 +371,7 @@ pub fn parse_grbl_line(message: &str) -> GrblMessage {
 
 #[cfg(test)]
 mod tests {
-    use nom::error::{Error, VerboseError};
+    use nom::error::{VerboseError};
 
     use super::*;
     /*

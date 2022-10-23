@@ -1,13 +1,11 @@
 use tokio::{
     sync::{
-        broadcast,
         mpsc,
     },
     io::{
         AsyncWrite,
         AsyncRead,
         AsyncWriteExt,
-        AsyncReadExt,
         BufReader,
         AsyncBufReadExt,
     },
@@ -16,9 +14,7 @@ use tokio::{
     select
 };
 use crate::util::history_broadcast;
-use super::messages::{
-    GrblState, GrblPosition, GrblStatus, GrblMessage
-};
+
 use std::str::from_utf8;
 
 #[derive(Clone)]
@@ -50,9 +46,9 @@ impl Machine {
                         to_send = write_reader.recv() => {
                             if let Some(mut line) = to_send {
                                 if line[0] == b'?' {
-                                    writer.write(b"?").await.unwrap();
+                                    writer.write_all(b"?").await.unwrap();
                                 } else {
-                                    writer.write(&line[..]).await.unwrap();
+                                    writer.write_all(&line[..]).await.unwrap();
                                 }
                                 line.pop();
                                 debug_stream.send(MachineDebugEvent::Sent(String::from(from_utf8(&line).unwrap())));

@@ -1,6 +1,6 @@
-use std::cmp::min;
 use std::{
     alloc::{alloc, Layout},
+    cmp::min,
     mem::MaybeUninit,
     sync::{Arc, RwLock},
 };

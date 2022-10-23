@@ -1,15 +1,13 @@
-use std::time::Duration;
-use tokio::{
-    io::stdin,
-    io::AsyncBufReadExt,
-    io::AsyncWriteExt,
-    io::BufReader,
-    io::{split, AsyncRead, AsyncWrite},
-    join,
-    time::sleep,
-};
-use tokio_serial::{
-    self, DataBits, FlowControl, Parity, SerialPort, SerialPortBuilderExt, StopBits,
+use {
+    std::time::Duration,
+    tokio::{
+        io::{split, stdin, AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader},
+        join,
+        time::sleep,
+    },
+    tokio_serial::{
+        self, DataBits, FlowControl, Parity, SerialPort, SerialPortBuilderExt, StopBits,
+    },
 };
 
 pub async fn open_and_reset_arduino_like_serial(path: &str) -> (impl AsyncRead, impl AsyncWrite) {

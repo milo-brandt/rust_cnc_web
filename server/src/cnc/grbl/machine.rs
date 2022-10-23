@@ -1,9 +1,11 @@
-use crate::util::history_broadcast;
-use tokio::{
-    io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader},
-    select, spawn,
-    sync::mpsc,
-    task::JoinHandle,
+use {
+    crate::util::history_broadcast,
+    tokio::{
+        io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader},
+        select, spawn,
+        sync::mpsc,
+        task::JoinHandle,
+    },
 };
 
 use std::str::from_utf8;

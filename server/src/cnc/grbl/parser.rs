@@ -1,35 +1,20 @@
-use super::messages::*;
 #[allow(unused_imports)] // This is used? Clippy thinks it's not for some reason
 use ndarray::array;
-use ndarray::Array1;
-use nom::branch::alt;
-use nom::bytes::complete::take_until;
-use nom::combinator::all_consuming;
-use nom::combinator::fail;
-use nom::combinator::flat_map;
-use nom::combinator::map_parser;
-use nom::combinator::map_res;
-use nom::combinator::success;
-use nom::error::FromExternalError;
-use nom::error::ParseError;
-use nom::sequence::delimited;
-use nom::sequence::preceded;
-use nom::sequence::separated_pair;
-use nom::sequence::terminated;
-use nom::sequence::tuple;
-use nom::Compare;
-use nom::FindSubstring;
-use nom::InputIter;
-use nom::InputLength;
-use nom::InputTake;
-use nom::{
-    self,
-    bytes::complete::{tag, take_while},
-    multi::separated_list0,
-    IResult, Parser,
+use {
+    super::messages::*,
+    ndarray::Array1,
+    nom::{
+        self,
+        branch::alt,
+        bytes::complete::{tag, take_until, take_while},
+        combinator::{all_consuming, fail, flat_map, map_parser, map_res, success},
+        error::{FromExternalError, ParseError},
+        multi::separated_list0,
+        sequence::{delimited, preceded, separated_pair, terminated, tuple},
+        Compare, FindSubstring, IResult, InputIter, InputLength, InputTake, Parser,
+    },
+    std::num::{ParseFloatError, ParseIntError},
 };
-use std::num::ParseFloatError;
-use std::num::ParseIntError;
 
 enum GrblStatusPart {
     CurrentFeed(f64),

@@ -1,8 +1,11 @@
-use super::{
-    AxisValues, CoordinateMode, CoordinateSystem, GCodeCommand, GCodeLine, GCodeModal, MoveMode,
-    OffsetAxisValues, Orientation, Plane, ProbeDirection, ProbeRequirement, SpindleMode, Unit,
+use {
+    super::{
+        AxisValues, CoordinateMode, CoordinateSystem, GCodeCommand, GCodeLine, GCodeModal,
+        MoveMode, OffsetAxisValues, Orientation, Plane, ProbeDirection, ProbeRequirement,
+        SpindleMode, Unit,
+    },
+    std::fmt::Display,
 };
-use std::fmt::Display;
 
 pub struct GCodeFormatSettings {
     axis_letters: Vec<u8>,
@@ -182,8 +185,7 @@ impl GCodeFormatSettings {
 
 #[cfg(test)]
 mod test {
-    use super::*;
-    use std::string::ToString;
+    use {super::*, std::string::ToString};
 
     fn default_settings() -> GCodeFormatSettings {
         GCodeFormatSettings {

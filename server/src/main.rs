@@ -2,25 +2,30 @@
 
 mod cnc;
 mod util;
-use axum::{
-    extract::ws::{Message, WebSocket, WebSocketUpgrade},
-    extract::RawBody,
-    response::Response,
-    routing::{get, post},
-    Extension, Router,
+use {
+    axum::{
+        extract::{
+            ws::{Message, WebSocket, WebSocketUpgrade},
+            RawBody,
+        },
+        response::Response,
+        routing::{get, post},
+        Extension, Router,
+    },
+    tower_http::cors::{Any, CorsLayer},
 };
-use tower_http::cors::{Any, CorsLayer};
 
-use futures::sink::SinkExt;
-use futures::stream::StreamExt;
-use tokio::join;
-use tokio::sync::oneshot;
+use {
+    futures::{sink::SinkExt, stream::StreamExt},
+    tokio::{join, sync::oneshot},
+};
 
-use cnc::grbl::machine::{Machine, MachineDebugEvent};
-use futures::stream::SplitStream;
-use std::str::from_utf8;
-use std::sync::Arc;
-use tokio::select;
+use {
+    cnc::grbl::machine::{Machine, MachineDebugEvent},
+    futures::stream::SplitStream,
+    std::{str::from_utf8, sync::Arc},
+    tokio::select,
+};
 
 #[tokio::main]
 async fn main() {

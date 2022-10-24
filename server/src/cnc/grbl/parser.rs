@@ -348,7 +348,9 @@ where
                 match head {
                     "PRB" => Box::new(
                         separated_pair(parse_float_array, tag(":"), parse_u64.map(|u| u != 0)).map(
-                            |(position, success)| GrblMessage::ProbeEvent { success, position },
+                            |(position, success)| {
+                                GrblMessage::ProbeEvent(ProbeEvent { success, position })
+                            },
                         ),
                     ),
                     _ => Box::new(fail),

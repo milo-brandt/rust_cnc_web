@@ -1,19 +1,76 @@
-use std::num::ParseFloatError;
+use std::{collections::HashMap, num::ParseFloatError};
 
-use nom::{
-    bytes::complete::{tag, take_while},
-    character::complete::{alpha1, space0, space1},
-    combinator::{fail, map_res},
-    error::{FromExternalError, ParseError},
-    IResult, Offset, Parser,
+use {
+    crate::cnc::gcode::{CoordinateMode, CoordinateSystem, Plane, SpindleMode, Unit},
+    itertools::Itertools,
+    nom::{
+        bytes::complete::{tag, take_while},
+        character::complete::{alpha1, space0, space1},
+        combinator::{fail, map_res},
+        error::{FromExternalError, ParseError},
+        Finish, IResult, Parser,
+    },
 };
-
-use crate::cnc::gcode::{CoordinateMode, CoordinateSystem, Plane, SpindleMode, Unit};
 
 use super::{
     AxisValues, GCodeCommand, GCodeFormatSpecification, GCodeLine, GCodeModal, MoveMode,
     OffsetAxisValues, Orientation, ProbeDirection, ProbeRequirement,
 };
+#[derive(Debug)]
+pub struct GCodeParseError<'a> {
+    pub remaining: &'a str,
+    pub description: String,
+}
+impl<'a> ParseError<&'a str> for GCodeParseError<'a> {
+    fn from_error_kind(input: &'a str, _kind: nom::error::ErrorKind) -> Self {
+        GCodeParseError {
+            remaining: input,
+            description: "unknown".to_string(),
+        }
+    }
+
+    fn append(_: &'a str, _: nom::error::ErrorKind, other: Self) -> Self {
+        other
+    }
+}
+impl<'a> FromExternalError<&'a str, ParseFloatError> for GCodeParseError<'a> {
+    fn from_external_error(
+        input: &'a str,
+        _kind: nom::error::ErrorKind,
+        _e: ParseFloatError,
+    ) -> Self {
+        GCodeParseError {
+            remaining: input,
+            description: "unknown".to_string(),
+        }
+    }
+}
+fn map_error<I, O, E1, E2, P: Parser<I, O, E1>, F: FnMut(E1) -> E2>(
+    mut parser: P,
+    mut f: F,
+) -> impl FnMut(I) -> IResult<I, O, E2> {
+    move |input| match parser.parse(input) {
+        Ok(v) => Ok(v),
+        Err(nom::Err::Error(e)) => Err(nom::Err::Error(f(e))),
+        Err(nom::Err::Failure(e)) => Err(nom::Err::Failure(f(e))),
+        Err(nom::Err::Incomplete(ct)) => Err(nom::Err::Incomplete(ct)),
+    }
+}
+fn map_error_description<'a, O, P: Parser<&'a str, O, GCodeParseError<'a>>, D: ToString>(
+    parser: P,
+    description: D,
+) -> impl FnMut(&'a str) -> IResult<&'a str, O, GCodeParseError<'a>> {
+    map_error(parser, move |e| GCodeParseError {
+        remaining: e.remaining,
+        description: description.to_string(),
+    })
+}
+fn make_error<O, D: ToString>(input: &str, description: D) -> IResult<&str, O, GCodeParseError> {
+    Err(nom::Err::Error(GCodeParseError {
+        remaining: input,
+        description: description.to_string(),
+    }))
+}
 
 enum PrimaryCommand {
     Move(MoveMode),
@@ -23,12 +80,12 @@ enum PrimaryCommand {
     Probe(ProbeDirection, ProbeRequirement),
 }
 
-struct PartialGCodeLine {
+struct PartialGCodeLine<'a> {
     modals: Vec<GCodeModal>,
     primary_command: Option<PrimaryCommand>,
     axis_values: AxisValues,
     offset_axis_values: OffsetAxisValues,
-    p_value: Option<f64>,
+    other_values: HashMap<u8, (f64, &'a str)>, //TODO: It's really silly to separate the logic here; would make more sense to collect all, then pop off as needed.
 }
 fn parse_f64<'a, Error: 'a + ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, f64, Error>
 where
@@ -50,40 +107,58 @@ macro_rules! extract_input {
 enum GCodePart<'a> {
     G(&'a str),
     M(&'a str),
-    P(f64),
     F(f64),
+    S(f64),
     AxisWord(usize, f64),
     OffsetAxisWord(usize, f64),
+    Other(u8, f64),
 }
-fn parse_part<'a, 'b, Error: 'a + ParseError<&'a str>>(
+fn parse_part<'a, 'b>(
     spec: &'b GCodeFormatSpecification,
-) -> impl Fn(&'a str) -> IResult<&'a str, GCodePart<'a>, Error> + 'b
-where
-    Error: FromExternalError<&'a str, ParseFloatError>,
-{
+) -> impl Fn(&'a str) -> IResult<&'a str, GCodePart<'a>, GCodeParseError<'a>> + 'b {
     // Assume we've already deal with whitespace
     |true_start| {
         let (mut input, head) = alpha1(true_start)?;
         match head {
             "G" => {
-                let name =
-                    extract_input!(input, take_while(|c: char| c.is_ascii_digit() || c == '-'));
+                let name = extract_input!(
+                    input,
+                    map_error_description(
+                        take_while(|c: char| c.is_ascii_digit() || c == '.'),
+                        "expected number after G"
+                    )
+                );
                 Ok((input, GCodePart::G(name)))
             }
             "M" => {
-                let name =
-                    extract_input!(input, take_while(|c: char| c.is_ascii_digit() || c == '-'));
+                let name = extract_input!(
+                    input,
+                    map_error_description(
+                        take_while(|c: char| c.is_ascii_digit()),
+                        "expected number after M"
+                    )
+                );
                 Ok((input, GCodePart::M(name)))
             }
-            "P" => {
-                let value = extract_input!(input, parse_f64);
-                Ok((input, GCodePart::P(value)))
-            }
             "F" => {
-                let value = extract_input!(input, parse_f64);
+                let value = extract_input!(
+                    input,
+                    map_error_description(parse_f64, "expected number after F")
+                );
                 Ok((input, GCodePart::F(value)))
             }
-            head if head.len() == 1 => match parse_f64::<Error>(input) {
+            "S" => {
+                let old_input = input;
+                let value = extract_input!(
+                    input,
+                    map_error_description(parse_f64, "expected number after S")
+                );
+                if value < 0.0 {
+                    return make_error(old_input, "spindle speed must be non-negative");
+                }
+                Ok((input, GCodePart::S(value)))
+            }
+            head if head.len() == 1 => match parse_f64::<GCodeParseError<'a>>(input) {
                 Ok((input, value)) => {
                     let head = head.bytes().next().unwrap();
                     for (index, axis_letter) in spec.axis_letters.iter().enumerate() {
@@ -96,28 +171,68 @@ where
                             return Ok((input, GCodePart::OffsetAxisWord(index, value)));
                         }
                     }
-                    fail(true_start)
+                    Ok((input, GCodePart::Other(head, value)))
                 }
-                _ => fail(true_start),
+                _ => make_error(true_start, "axis letter must be followed by number"),
             },
-            _ => fail(true_start),
+            _ => make_error(true_start, "axis must be one letter"),
         }
     }
 }
-
-fn parse_gcode_line<'a, 'b, Error: 'a + ParseError<&'a str>>(
+fn same_modal_group(lhs: &GCodeModal, rhs: &GCodeModal) -> bool {
+    matches!(
+        (lhs, rhs),
+        (GCodeModal::SetFeedrate(_), GCodeModal::SetFeedrate(_))
+            | (GCodeModal::SetUnits(_), GCodeModal::SetUnits(_))
+            | (GCodeModal::SetArcPlane(_), GCodeModal::SetArcPlane(_))
+            | (
+                GCodeModal::SetCoordinateSystem(_),
+                GCodeModal::SetCoordinateSystem(_)
+            )
+            | (
+                GCodeModal::SetCoordinateMode(_),
+                GCodeModal::SetCoordinateMode(_)
+            )
+            | (GCodeModal::SetSpindle(_), GCodeModal::SetSpindle(_))
+            | (
+                GCodeModal::SetSpindleSpeed(_),
+                GCodeModal::SetSpindleSpeed(_)
+            )
+            | (GCodeModal::EndProgram, GCodeModal::EndProgram)
+    )
+}
+macro_rules! append_modal {
+    ( $position: ident, $modals: expr,  $x: expr ) => {{
+        let new_modal = $x;
+        for modal in $modals {
+            if same_modal_group(&modal, &new_modal) {
+                return make_error($position, "two modals from same group");
+            }
+        }
+        $modals.push(new_modal);
+    }};
+}
+macro_rules! append_axis_word {
+    ( $position: ident, $axis_vec: expr, $index: ident, $value: ident ) => {{
+        for (index, _) in $axis_vec {
+            if *index == $index {
+                return make_error($position, "repeated axis letter");
+            }
+        }
+        $axis_vec.push(($index, $value));
+    }};
+}
+fn parse_gcode_line_impl<'a, 'b>(
     spec: &'b GCodeFormatSpecification,
-) -> impl Fn(&'a str) -> IResult<&'a str, GCodeLine, Error> + 'b
-where
-    Error: FromExternalError<&'a str, ParseFloatError>,
-{
+) -> impl Fn(&'a str) -> IResult<&'a str, GCodeLine, GCodeParseError<'a>> + 'b {
     |mut input| {
+        let full_input = input;
         let mut line = PartialGCodeLine {
             modals: vec![],
             primary_command: None,
             axis_values: AxisValues(vec![]),
             offset_axis_values: OffsetAxisValues(vec![]),
-            p_value: None,
+            other_values: Default::default(),
         };
         let set_primary = |line: &mut PartialGCodeLine, input: &'a str, primary_command| {
             if line.primary_command.is_some() {
@@ -132,6 +247,7 @@ where
             if input.is_empty() {
                 break;
             }
+            let prior_input = input;
             let part = extract_input!(input, parse_part(spec));
             match part {
                 GCodePart::G("0") => {
@@ -172,86 +288,208 @@ where
                     PrimaryCommand::Probe(ProbeDirection::Away, ProbeRequirement::Optional),
                 )?,
                 GCodePart::G("10") => {
-                    extract_input!(input, space1);
-                    extract_input!(input, tag("L20"));
+                    extract_input!(
+                        input,
+                        map_error_description(space1, "expected space then L20 after G10")
+                    );
+                    extract_input!(
+                        input,
+                        map_error_description(tag("L20"), "expected L20 after G10")
+                    );
                     set_primary(&mut line, input, PrimaryCommand::SetWorkCoordinate)?
                 }
-                GCodePart::G("17") => line.modals.push(GCodeModal::SetArcPlane(Plane::XY)),
-                GCodePart::G("18") => line.modals.push(GCodeModal::SetArcPlane(Plane::ZX)),
-                GCodePart::G("19") => line.modals.push(GCodeModal::SetArcPlane(Plane::YZ)),
-                GCodePart::G("20") => line.modals.push(GCodeModal::SetUnits(Unit::Inch)),
-                GCodePart::G("21") => line.modals.push(GCodeModal::SetUnits(Unit::Millimeter)),
-                GCodePart::G("54") => line
-                    .modals
-                    .push(GCodeModal::SetCoordinateSystem(CoordinateSystem::Coord0)),
-                GCodePart::G("55") => line
-                    .modals
-                    .push(GCodeModal::SetCoordinateSystem(CoordinateSystem::Coord1)),
-                GCodePart::G("56") => line
-                    .modals
-                    .push(GCodeModal::SetCoordinateSystem(CoordinateSystem::Coord2)),
-                GCodePart::G("57") => line
-                    .modals
-                    .push(GCodeModal::SetCoordinateSystem(CoordinateSystem::Coord3)),
-                GCodePart::G("58") => line
-                    .modals
-                    .push(GCodeModal::SetCoordinateSystem(CoordinateSystem::Coord4)),
-                GCodePart::G("59") => line
-                    .modals
-                    .push(GCodeModal::SetCoordinateSystem(CoordinateSystem::Coord5)),
-                GCodePart::G("90") => line
-                    .modals
-                    .push(GCodeModal::SetCoordinateMode(CoordinateMode::Absolute)),
-                GCodePart::G("91") => line
-                    .modals
-                    .push(GCodeModal::SetCoordinateMode(CoordinateMode::Incremental)),
-                GCodePart::M("2") => line.modals.push(GCodeModal::EndProgram),
-                GCodePart::M("3") => line
-                    .modals
-                    .push(GCodeModal::SetSpindle(SpindleMode::Clockwise)),
-                GCodePart::M("5") => line.modals.push(GCodeModal::SetSpindle(SpindleMode::Off)),
-                GCodePart::G(_) => return fail(input),
-                GCodePart::M(_) => return fail(input),
-                GCodePart::P(value) => {
-                    if line.p_value.is_none() {
-                        line.p_value = Some(value);
+                GCodePart::G("17") => append_modal!(
+                    prior_input,
+                    &mut line.modals,
+                    GCodeModal::SetArcPlane(Plane::XY)
+                ),
+                GCodePart::G("18") => append_modal!(
+                    prior_input,
+                    &mut line.modals,
+                    GCodeModal::SetArcPlane(Plane::ZX)
+                ),
+                GCodePart::G("19") => append_modal!(
+                    prior_input,
+                    &mut line.modals,
+                    GCodeModal::SetArcPlane(Plane::YZ)
+                ),
+                GCodePart::G("20") => append_modal!(
+                    prior_input,
+                    &mut line.modals,
+                    GCodeModal::SetUnits(Unit::Inch)
+                ),
+                GCodePart::G("21") => append_modal!(
+                    prior_input,
+                    &mut line.modals,
+                    GCodeModal::SetUnits(Unit::Millimeter)
+                ),
+                GCodePart::G("54") => append_modal!(
+                    prior_input,
+                    &mut line.modals,
+                    GCodeModal::SetCoordinateSystem(CoordinateSystem::Coord0)
+                ),
+                GCodePart::G("55") => append_modal!(
+                    prior_input,
+                    &mut line.modals,
+                    GCodeModal::SetCoordinateSystem(CoordinateSystem::Coord1)
+                ),
+                GCodePart::G("56") => append_modal!(
+                    prior_input,
+                    &mut line.modals,
+                    GCodeModal::SetCoordinateSystem(CoordinateSystem::Coord2)
+                ),
+                GCodePart::G("57") => append_modal!(
+                    prior_input,
+                    &mut line.modals,
+                    GCodeModal::SetCoordinateSystem(CoordinateSystem::Coord3)
+                ),
+                GCodePart::G("58") => append_modal!(
+                    prior_input,
+                    &mut line.modals,
+                    GCodeModal::SetCoordinateSystem(CoordinateSystem::Coord4)
+                ),
+                GCodePart::G("59") => append_modal!(
+                    prior_input,
+                    &mut line.modals,
+                    GCodeModal::SetCoordinateSystem(CoordinateSystem::Coord5)
+                ),
+                GCodePart::G("90") => append_modal!(
+                    prior_input,
+                    &mut line.modals,
+                    GCodeModal::SetCoordinateMode(CoordinateMode::Absolute)
+                ),
+                GCodePart::G("91") => append_modal!(
+                    prior_input,
+                    &mut line.modals,
+                    GCodeModal::SetCoordinateMode(CoordinateMode::Incremental)
+                ),
+                GCodePart::M("2") => {
+                    append_modal!(prior_input, &mut line.modals, GCodeModal::EndProgram)
+                }
+                GCodePart::M("3") => append_modal!(
+                    prior_input,
+                    &mut line.modals,
+                    GCodeModal::SetSpindle(SpindleMode::Clockwise)
+                ),
+                GCodePart::M("5") => append_modal!(
+                    prior_input,
+                    &mut line.modals,
+                    GCodeModal::SetSpindle(SpindleMode::Off)
+                ),
+                GCodePart::F(value) => append_modal!(
+                    prior_input,
+                    &mut line.modals,
+                    GCodeModal::SetFeedrate(value)
+                ),
+                GCodePart::S(value) => append_modal!(
+                    prior_input,
+                    &mut line.modals,
+                    GCodeModal::SetSpindleSpeed(value)
+                ),
+                GCodePart::G(_) => return make_error(prior_input, "unrecognized G code"),
+                GCodePart::M(_) => return make_error(prior_input, "unrecognized M code"),
+                GCodePart::Other(head, value) => {
+                    if let std::collections::hash_map::Entry::Vacant(e) =
+                        line.other_values.entry(head)
+                    {
+                        e.insert((value, input));
                     } else {
-                        return fail(input);
+                        return make_error(prior_input, "repeated axis letter");
                     }
                 }
-                GCodePart::F(value) => line.modals.push(GCodeModal::SetFeedrate(value)),
-                GCodePart::AxisWord(index, value) => line.axis_values.0.push((index, value)),
+                GCodePart::AxisWord(index, value) => {
+                    append_axis_word!(prior_input, &mut line.axis_values.0, index, value)
+                }
                 GCodePart::OffsetAxisWord(index, value) => {
-                    line.offset_axis_values.0.push((index, value))
+                    append_axis_word!(prior_input, &mut line.offset_axis_values.0, index, value)
                 }
             }
         }
         // Process the line
         let gcode_command = match line.primary_command {
-            Some(PrimaryCommand::Move(mode)) => Some(GCodeCommand::Move {
-                mode,
-                position: line.axis_values,
-            }),
-            Some(PrimaryCommand::Dwell) => match line.p_value {
-                Some(p_value) => Some(GCodeCommand::Dwell { duration: p_value }),
-                None => return fail(input),
-            },
-            Some(PrimaryCommand::ArcMove(orientation)) => Some(GCodeCommand::ArcMove {
-                orientation,
-                position: line.axis_values,
-                offsets: line.offset_axis_values,
-                revolutions: line.p_value.map(|f| f as u64),
-            }),
-            Some(PrimaryCommand::Probe(mode, requirement)) => Some(GCodeCommand::Probe {
-                position: line.axis_values,
-                mode,
-                requirement,
-            }),
+            Some(PrimaryCommand::Move(mode)) => {
+                if !line.offset_axis_values.0.is_empty() {
+                    return make_error(full_input, "move contains offset axis words");
+                }
+                Some(GCodeCommand::Move {
+                    mode,
+                    position: line.axis_values,
+                })
+            }
+            Some(PrimaryCommand::Dwell) => {
+                if !line.axis_values.0.is_empty() {
+                    return make_error(full_input, "dwell contains axis words");
+                }
+                if !line.offset_axis_values.0.is_empty() {
+                    return make_error(full_input, "dwell contains offset axis words");
+                }
+                match line.other_values.remove_entry(&b'P') {
+                    Some((_, (p_value, _))) => Some(GCodeCommand::Dwell { duration: p_value }),
+                    None => return make_error(full_input, "dwell without P value"),
+                }
+            }
+            Some(PrimaryCommand::ArcMove(orientation)) => {
+                if line.axis_values.0.is_empty() {
+                    return make_error(full_input, "arc move without axis words");
+                }
+                if line.offset_axis_values.0.is_empty() {
+                    return make_error(full_input, "arc move without offset axis words");
+                }
+                Some(GCodeCommand::ArcMove {
+                    orientation,
+                    position: line.axis_values,
+                    offsets: line.offset_axis_values,
+                    revolutions: line
+                        .other_values
+                        .remove_entry(&b'P')
+                        .map(|(_, (value, _))| value as u64),
+                })
+            }
+            Some(PrimaryCommand::Probe(mode, requirement)) => {
+                if line.axis_values.0.is_empty() {
+                    return make_error(full_input, "probe without axis words");
+                }
+                if !line.offset_axis_values.0.is_empty() {
+                    return make_error(full_input, "probe contains offset axis words");
+                }
+                Some(GCodeCommand::Probe {
+                    position: line.axis_values,
+                    mode,
+                    requirement,
+                })
+            }
             Some(PrimaryCommand::SetWorkCoordinate) => {
+                if line.axis_values.0.is_empty() {
+                    return make_error(full_input, "set coordinates without axis words");
+                }
+                if !line.offset_axis_values.0.is_empty() {
+                    return make_error(full_input, "set coordinates contains offset axis words");
+                }
                 Some(GCodeCommand::SetWorkCoordinateTo(line.axis_values))
             }
-            None => None,
+            None => {
+                if !line.offset_axis_values.0.is_empty() {
+                    return make_error(full_input, "anonymous line contains offset axis words");
+                }
+                if line.axis_values.0.is_empty() {
+                    None
+                } else {
+                    Some(GCodeCommand::Move {
+                        mode: MoveMode::Unspecified,
+                        position: line.axis_values,
+                    })
+                }
+            }
         };
+        if !line.other_values.is_empty() {
+            return make_error(
+                full_input,
+                format!(
+                    "unrecognized letters: {}",
+                    line.other_values.into_keys().format(", ")
+                ),
+            );
+        }
         Ok((
             input,
             GCodeLine {
@@ -260,6 +498,46 @@ where
             },
         ))
     }
+}
+#[derive(Debug)]
+pub enum GeneralizedLine<'a> {
+    Line(GCodeLine),
+    Comment(&'a str),
+    Empty,
+}
+fn parse_generalized_line_impl<'a, 'b>(
+    spec: &'b GCodeFormatSpecification,
+) -> impl Fn(&'a str) -> IResult<&'a str, GeneralizedLine<'a>, GCodeParseError<'a>> + 'b {
+    move |mut input| {
+        extract_input!(input, space0);
+        if input.is_empty() {
+            Ok((input, GeneralizedLine::Empty))
+        } else if input.starts_with('(') {
+            Ok((&input[input.len()..], GeneralizedLine::Comment(input)))
+        } else {
+            parse_gcode_line_impl(spec)
+                .map(GeneralizedLine::Line)
+                .parse(input)
+        }
+    }
+}
+pub fn parse_gcode_line<'a>(
+    spec: &GCodeFormatSpecification,
+    line: &'a str,
+) -> Result<GCodeLine, GCodeParseError<'a>> {
+    parse_gcode_line_impl(spec)
+        .parse(line)
+        .finish()
+        .map(|(_i, o)| o)
+}
+pub fn parse_generalized_line<'a>(
+    spec: &GCodeFormatSpecification,
+    line: &'a str,
+) -> Result<GeneralizedLine<'a>, GCodeParseError<'a>> {
+    parse_generalized_line_impl(spec)
+        .parse(line)
+        .finish()
+        .map(|(_i, o)| o)
 }
 
 #[cfg(test)]
@@ -270,14 +548,28 @@ mod test {
         GCodeFormatSpecification {
             axis_letters: b"XYZA".to_vec(),
             offset_axis_letters: b"IJK".to_vec(),
-            float_digits: 2,
+            float_digits: 3,
         }
     }
 
     #[test]
     fn test_parse() {
-        let input = "G10 L2 X5 Y123 Z23 G90 G21 F250";
-        let result: Result<_, nom::Err<()>> = parse_gcode_line(&default_settings())(input);
+        let input = "G10 L20 X5 Y123 Z23 G90 G21 F250";
+        let result: Result<_, _> = parse_gcode_line_impl(&default_settings())(input);
         println!("{:?}", result);
+    }
+
+    #[test]
+    fn test_examples() {
+        let input = include_str!("test_data/disk_job.nc");
+        for line in input.lines() {
+            let result = parse_generalized_line(&default_settings(), line);
+            println!("Line: {:?}", line);
+            println!("\tResult: {:?}", result);
+            if let Ok(GeneralizedLine::Line(gcode)) = &result {
+                println!("\tReparsed: {}", default_settings().format_line(gcode));
+            }
+            assert!(result.is_ok());
+        }
     }
 }

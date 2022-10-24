@@ -53,6 +53,7 @@ impl<'a> Display for GCodeModalPrinter<'a> {
             GCodeModal::SetCoordinateMode(CoordinateMode::Incremental) => write!(f, "G91"),
             GCodeModal::SetSpindle(SpindleMode::Clockwise) => write!(f, "M3"),
             GCodeModal::SetSpindle(SpindleMode::Off) => write!(f, "M5"),
+            GCodeModal::SetSpindleSpeed(speed) => write!(f, "S{:.1$}", speed, self.float_digits),
             GCodeModal::EndProgram => write!(f, "M2"),
         }
     }
@@ -168,7 +169,7 @@ impl GCodeFormatSpecification {
             command,
         }
     }
-    fn format_line<'a>(&'a self, line: &'a GCodeLine) -> impl Display + 'a {
+    pub fn format_line<'a>(&'a self, line: &'a GCodeLine) -> impl Display + 'a {
         GCodeLinePrinter {
             settings: self,
             line,

@@ -58,6 +58,7 @@ pub enum GCodeModal {
     SetCoordinateSystem(CoordinateSystem),
     SetCoordinateMode(CoordinateMode),
     SetSpindle(SpindleMode),
+    SetSpindleSpeed(f64),
     EndProgram,
 }
 #[derive(Debug)]
@@ -98,37 +99,6 @@ pub enum GCodeCommand {
 pub struct GCodeLine {
     modals: Vec<GCodeModal>,
     command: Option<GCodeCommand>,
-}
-impl GCodeModal {
-    fn same_group(lhs: &GCodeModal, rhs: &GCodeModal) -> bool {
-        matches!(
-            (lhs, rhs),
-            (GCodeModal::SetFeedrate(_), GCodeModal::SetFeedrate(_))
-                | (GCodeModal::SetArcPlane(_), GCodeModal::SetArcPlane(_))
-                | (
-                    GCodeModal::SetCoordinateSystem(_),
-                    GCodeModal::SetCoordinateSystem(_)
-                )
-                | (
-                    GCodeModal::SetCoordinateMode(_),
-                    GCodeModal::SetCoordinateMode(_)
-                )
-                | (GCodeModal::SetSpindle(_), GCodeModal::SetSpindle(_))
-                | (GCodeModal::EndProgram, GCodeModal::EndProgram)
-        )
-    }
-}
-impl GCodeLine {
-    fn is_valid(&self) -> bool {
-        for i in 0..self.modals.len() {
-            for j in 0..i {
-                if GCodeModal::same_group(&self.modals[i], &self.modals[j]) {
-                    return false;
-                }
-            }
-        }
-        true
-    }
 }
 pub struct GCodeFormatSpecification {
     axis_letters: Vec<u8>,

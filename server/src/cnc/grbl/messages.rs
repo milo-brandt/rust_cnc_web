@@ -55,13 +55,15 @@ impl GrblStatus {
         }
     }
 }
+#[derive(Debug, Clone, PartialEq)]
+pub struct ProbeEvent {
+    pub success: bool,
+    pub position: Array1<f64>,
+}
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum GrblMessage {
-    ProbeEvent {
-        success: bool,
-        position: Array1<f64>,
-    },
+    ProbeEvent(ProbeEvent),
     StatusEvent(GrblStatus),
     GrblError(u64),
     GrblAlarm(u64),

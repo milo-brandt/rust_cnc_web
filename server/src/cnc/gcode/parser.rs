@@ -560,16 +560,20 @@ mod test {
     }
 
     #[test]
-    fn test_examples() {
-        let input = include_str!("test_data/disk_job.nc");
-        for line in input.lines() {
-            let result = parse_generalized_line(&default_settings(), line);
-            println!("Line: {:?}", line);
-            println!("\tResult: {:?}", result);
-            if let Ok(GeneralizedLine::Line(gcode)) = &result {
-                println!("\tReparsed: {}", default_settings().format_line(gcode));
+    fn test_good_examples() {
+        for input in vec![
+            include_str!("test_data/disk_job.nc"),
+            include_str!("test_data/front_face.nc")
+        ] {
+            for line in input.lines() {
+                let result = parse_generalized_line(&default_settings(), line);
+                println!("Line: {:?}", line);
+                println!("\tResult: {:?}", result);
+                if let Ok(GeneralizedLine::Line(gcode)) = &result {
+                    println!("\tReparsed: {}", default_settings().format_line(gcode));
+                }
+                assert!(result.is_ok());
             }
-            assert!(result.is_ok());
         }
     }
 }

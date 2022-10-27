@@ -131,6 +131,7 @@ dependencies = [
  "itertools",
  "ndarray",
  "nom",
+ "pin-project",
  "tokio",
  "tokio-serial",
  "tokio-stream",

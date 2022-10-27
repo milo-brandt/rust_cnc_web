@@ -35,6 +35,12 @@ pub struct GrblStatus {
     pub accessory_state: Option<String>,
     pub unknown_terms: Vec<String>,
 }
+#[derive(Debug, Clone, PartialEq)]
+pub struct GrblStateInfo {
+    pub machine_position: Array1<f64>,
+    pub work_coordinate_offset: Array1<f64>,
+}
+
 impl GrblStatus {
     pub fn new(state: GrblState, machine_position: GrblPosition) -> Self {
         GrblStatus {

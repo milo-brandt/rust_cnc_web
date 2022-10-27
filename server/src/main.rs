@@ -2,6 +2,11 @@
 
 mod cnc;
 mod util;
+
+use std::str::from_utf8_unchecked;
+
+use cnc::grbl::new_machine::{ImmediateRequest, WriteRequest};
+
 use {
     axum::{
         extract::{
@@ -21,9 +26,9 @@ use {
 };
 
 use {
-    cnc::grbl::machine::{Machine, MachineDebugEvent},
+    cnc::grbl::new_machine::{start_machine, MachineDebugEvent, MachineInterface},
     futures::stream::SplitStream,
-    std::{str::from_utf8, sync::Arc},
+    std::sync::Arc,
     tokio::select,
 };
 
@@ -39,7 +44,7 @@ async fn main() {
     // Or double submit cookie?
     let (reader, writer) =
         cnc::connection::open_and_reset_arduino_like_serial("/dev/ttyUSB0").await;
-    let machine = Machine::new(reader, writer);
+    let machine = start_machine(reader, writer).await.unwrap();
     // build our application with a single route
     let app = Router::new()
         .route("/debug/send", post(index))
@@ -76,8 +81,8 @@ async fn main() {
     Sse::new(result).keep_alive(KeepAlive::default())
 } */
 
-async fn listen_raw(ws: WebSocketUpgrade, machine: Extension<Arc<Machine>>) -> Response {
-    let mut debug_receiver = machine.debug_stream_subscribe();
+async fn listen_raw(ws: WebSocketUpgrade, machine: Extension<Arc<MachineInterface>>) -> Response {
+    let mut debug_receiver = machine.debug_stream.subscribe_with_history_count(100);
     ws.on_upgrade(move |socket| async move {
         let (mut writer, mut reader) = socket.split();
         let (closer, mut close_listen) = oneshot::channel::<()>();
@@ -88,8 +93,9 @@ async fn listen_raw(ws: WebSocketUpgrade, machine: Extension<Arc<Machine>>) -> R
                         event = debug_receiver.recv() => {
                             let event = event.unwrap();
                             let message = match event {
-                                MachineDebugEvent::Sent(str) => format!("> {}", str),
+                                MachineDebugEvent::Sent(str) => format!("> {}", unsafe { from_utf8_unchecked(&str) }),
                                 MachineDebugEvent::Received(str) => format!("< {}", str),
+                                MachineDebugEvent::Warning(str) => format!("! {}", str)
                             };
                             if writer.send(Message::Text(message)).await.is_err() {
                                 break
@@ -120,21 +126,35 @@ async fn listen_raw(ws: WebSocketUpgrade, machine: Extension<Arc<Machine>>) -> R
     })
 }
 
-async fn index(message: RawBody, machine: Extension<Arc<Machine>>) -> String {
+async fn index(message: RawBody, machine: Extension<Arc<MachineInterface>>) -> String {
     let mut body_bytes = hyper::body::to_bytes(message.0).await.unwrap().to_vec();
-    println!("Writing!");
-    body_bytes.push(b'\n');
-    let result = format!("Sent message: {}", from_utf8(&body_bytes).unwrap());
-    drop(machine.get_write_sender().send(body_bytes).await);
-    result
+    if body_bytes.len() == 1 && body_bytes[0] == b'?' {
+        let (sender, receiver) = oneshot::channel();
+        machine
+            .immediate_write_stream
+            .send(ImmediateRequest::Status { result: sender })
+            .await
+            .unwrap();
+        match receiver.await {
+            Ok(result) => format!("{:?}", result),
+            Err(_) => "Internal error immediate?".to_string(),
+        }
+    } else {
+        body_bytes.push(b'\n');
+        //let result = format!("Sent message: {}", from_utf8(&body_bytes).unwrap());
+        let (sender, receiver) = oneshot::channel();
+        machine
+            .write_stream
+            .send(WriteRequest::Plain {
+                data: body_bytes,
+                result: sender,
+            })
+            .await
+            .unwrap();
+        match receiver.await {
+            Ok(Ok(())) => "Success!".to_string(),
+            Ok(Err(id)) => format!("Failed: {}", id),
+            Err(_) => "Internal error?".to_string(),
+        }
+    }
 }
-
-//use cnc::connection::SerialConnection;
-
-/*
-#[tokio::main]
-async fn main() {
-    let (reader, writer) = cnc::connection::open_and_reset_arduino_like_serial("/dev/ttyUSB0").await;
-    cnc::connection::as_fake_terminal(reader, writer).await;
-}
-*/

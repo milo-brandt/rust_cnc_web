@@ -389,11 +389,7 @@ fn parse_gcode_line_impl<'a, 'b>(
                 GCodePart::G(_) => return make_error(prior_input, "unrecognized G code"),
                 GCodePart::M(_) => return make_error(prior_input, "unrecognized M code"),
                 GCodePart::Other(head, value) => {
-                    if let std::collections::hash_map::Entry::Vacant(e) =
-                        line.other_values.entry(head)
-                    {
-                        e.insert((value, input));
-                    } else {
+                    if line.other_values.insert(head, (value, input)).is_some() {
                         return make_error(prior_input, "repeated axis letter");
                     }
                 }
@@ -561,9 +557,9 @@ mod test {
 
     #[test]
     fn test_good_examples() {
-        for input in vec![
+        for input in &[
             include_str!("test_data/disk_job.nc"),
-            include_str!("test_data/front_face.nc")
+            include_str!("test_data/front_face.nc"),
         ] {
             for line in input.lines() {
                 let result = parse_generalized_line(&default_settings(), line);

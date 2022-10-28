@@ -62,6 +62,9 @@ pub fn DebugPage(cx: Scope) -> View<DomNode> {
         .history .incoming {
             color: cyan;
         }
+        .history .warning {
+            color: red;
+        }
         .input {
             flex-grow: 0;
             flex-shrink: 0;
@@ -159,6 +162,8 @@ pub fn DebugPage(cx: Scope) -> View<DomNode> {
                     view=|cx, x| {
                         let class_name = if x.starts_with("> ") {
                             "outgoing"
+                        } else if x.starts_with("! ") {
+                            "warning"
                         } else {
                             "incoming"
                         };

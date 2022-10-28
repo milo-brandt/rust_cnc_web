@@ -97,11 +97,11 @@ pub enum GCodeCommand {
 }
 #[derive(Debug)]
 pub struct GCodeLine {
-    modals: Vec<GCodeModal>,
-    command: Option<GCodeCommand>,
+    pub modals: Vec<GCodeModal>,
+    pub command: Option<GCodeCommand>,
 }
 pub struct GCodeFormatSpecification {
-    axis_letters: Vec<u8>,
-    offset_axis_letters: Vec<u8>,
-    float_digits: usize,
+    pub axis_letters: Vec<u8>,
+    pub offset_axis_letters: Vec<u8>,
+    pub float_digits: usize,
 }

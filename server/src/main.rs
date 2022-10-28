@@ -3,9 +3,11 @@
 mod cnc;
 mod util;
 
-use std::str::from_utf8_unchecked;
+use std::{str::from_utf8_unchecked, time::Duration};
 
-use cnc::grbl::new_machine::{ImmediateRequest, WriteRequest};
+use axum::body;
+use cnc::{grbl::new_machine::{ImmediateRequest, WriteRequest}, gcode::{parser::parse_gcode_line, GCodeFormatSpecification}, broker::{Broker, MachineHandle, MessageFromJob, JobInnerHandle}};
+use tokio::time::sleep;
 
 use {
     axum::{
@@ -48,10 +50,13 @@ async fn main() {
     // build our application with a single route
     let app = Router::new()
         .route("/debug/send", post(index))
+        .route("/debug/send_job", post(send_job))
         .route("/debug/listen_raw", get(listen_raw))
+        .route("/debug/listen_status", get(listen_status))
         //.route("/ws", get(websocket_upgrade))
         .layer(cors)
-        .layer(Extension(Arc::new(machine)));
+        .layer(Extension(Arc::new(machine)))
+        .layer(Extension(Arc::new(Broker::new())));
 
     // run it with hyper on localhost:3000
     println!("Listening on port 3000...");
@@ -126,6 +131,14 @@ async fn listen_raw(ws: WebSocketUpgrade, machine: Extension<Arc<MachineInterfac
     })
 }
 
+fn default_settings() -> GCodeFormatSpecification {
+    GCodeFormatSpecification {
+        axis_letters: b"XYZA".to_vec(),
+        offset_axis_letters: b"IJK".to_vec(),
+        float_digits: 3,
+    }
+}
+
 async fn index(message: RawBody, machine: Extension<Arc<MachineInterface>>) -> String {
     let mut body_bytes = hyper::body::to_bytes(message.0).await.unwrap().to_vec();
     if body_bytes.len() == 1 && body_bytes[0] == b'?' {
@@ -140,13 +153,25 @@ async fn index(message: RawBody, machine: Extension<Arc<MachineInterface>>) -> S
             Err(_) => "Internal error immediate?".to_string(),
         }
     } else {
-        body_bytes.push(b'\n');
+        let bytes = if !body_bytes.is_empty() && body_bytes[0] == b'\\' {
+            body_bytes.push(b'\n');
+            (&body_bytes[1..]).to_vec()
+        } else {
+            let line = unsafe { from_utf8_unchecked(&body_bytes) };
+            let gcode = parse_gcode_line(&default_settings(), &line);
+            match gcode {
+                Ok(gcode_line) => format!("{}\n", default_settings().format_line(&gcode_line)),
+                Err(err) => return format!("Bad gcode: {:?}", err),
+            }.into_bytes()
+        };
+        //body_bytes.push(b'\n');
+
         //let result = format!("Sent message: {}", from_utf8(&body_bytes).unwrap());
         let (sender, receiver) = oneshot::channel();
         machine
             .write_stream
             .send(WriteRequest::Plain {
-                data: body_bytes,
+                data: bytes,
                 result: sender,
             })
             .await
@@ -157,4 +182,69 @@ async fn index(message: RawBody, machine: Extension<Arc<MachineInterface>>) -> S
             Err(_) => "Internal error?".to_string(),
         }
     }
+}
+async fn send_job(message: RawBody, machine: Extension<Arc<MachineInterface>>, broker: Extension<Arc<Broker>>) -> String {
+    let mut body_bytes = hyper::body::to_bytes(message.0).await.unwrap().to_vec();
+    body_bytes.push(b'\n');
+    let result = broker.try_send_job(move |handle: MachineHandle, job_inner: JobInnerHandle| async move {
+        let (sender, receiver) = oneshot::channel();
+        job_inner.return_stream.send(MessageFromJob::Status("About to send!".to_string())).await.unwrap();
+        handle.write_stream.send(WriteRequest::Plain {
+            data: body_bytes,
+            result: sender
+        }).await.unwrap();
+        job_inner.return_stream.send(MessageFromJob::Status("Sent!".to_string())).await.unwrap();
+        receiver.await.unwrap().unwrap();
+        job_inner.return_stream.send(MessageFromJob::Status("Done!".to_string())).await.unwrap();
+        sleep(Duration::from_millis(500)).await;
+        job_inner.return_stream.send(MessageFromJob::Status("Done sleeping!".to_string())).await.unwrap();
+    }, MachineHandle {
+        write_stream: machine.write_stream.clone(),
+        immediate_write_stream: machine.immediate_write_stream.clone(),
+    });
+    match result {
+        Ok(()) => "Job sent!".to_string(),
+        Err(_) => "Job not sent!".to_string(),
+    }
+}
+
+async fn listen_status(ws: WebSocketUpgrade, broker: Extension<Arc<Broker>>) -> Response {
+    let mut debug_receiver = broker.watch_status();
+    ws.on_upgrade(move |socket| async move {
+        let (mut writer, mut reader) = socket.split();
+        let (closer, mut close_listen) = oneshot::channel::<()>();
+        let (writer, reader) = join! {
+            async move {
+                loop {
+                    select! {
+                        event = debug_receiver.changed() => {
+                            let status = debug_receiver.borrow().clone();
+                            if writer.send(Message::Text((*status).clone())).await.is_err() {
+                                break
+                            }
+                            sleep(Duration::from_millis(100)).await; //Limit events to once per 100 ms. A little hacky - won't hear close_listen till later.
+                        }
+                        _ = &mut close_listen => break
+                    }
+                }
+                writer
+            },
+            async move {
+                //ensure that this is actually getting read - so we can handle close frame!
+                loop {
+                    let response = <SplitStream<WebSocket> as StreamExt>::next(&mut reader).await;
+                    if let Some(Ok(Message::Close(_))) = response {
+                        closer.send(()).unwrap();
+                        break
+                    }
+                    if response.is_none() {
+                        break
+                    }
+                }
+                reader
+            }
+        };
+        let together = reader.reunite(writer).unwrap();
+        drop(together.close().await);
+    })
 }

@@ -95,7 +95,7 @@ impl<'a> Display for GCodeCommandPrinter<'a> {
                 Ok(())
             }
             GCodeCommand::Dwell { duration } => {
-                write!(f, "G4 {:1$}", duration, self.settings.float_digits)
+                write!(f, "G4 P{:1$}", duration, self.settings.float_digits)
             }
             GCodeCommand::SetWorkCoordinateTo(coordinates) => {
                 write!(f, "G10 L20 {}", self.settings.format_axes(coordinates))

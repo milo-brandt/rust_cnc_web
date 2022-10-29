@@ -68,7 +68,7 @@ pub struct Broker {
 impl Broker {
     pub fn new() -> Self {
         let (new_job_sender, mut new_job_receiver) = mpsc::channel(8);
-        let (mut watch_sender, watch_receiver) = watch::channel(Arc::new("Idle".to_string()));
+        let (watch_sender, watch_receiver) = watch::channel(Arc::new("Idle".to_string()));
         let is_busy = Arc::new(AtomicBool::new(false));
         let is_busy_clone = is_busy.clone();
         let broker_task = spawn(async move {

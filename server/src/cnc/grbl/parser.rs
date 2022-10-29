@@ -418,9 +418,7 @@ pub fn parse_grbl_line(message: &str) -> GrblMessage {
 
 #[cfg(test)]
 mod tests {
-    use nom::error::VerboseError;
-
-    use super::*;
+    use {super::*, nom::error::VerboseError};
     /*
     Small tests
     */

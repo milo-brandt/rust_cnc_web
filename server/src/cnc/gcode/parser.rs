@@ -1,5 +1,3 @@
-use std::{collections::HashMap, num::ParseFloatError};
-
 use {
     super::{
         AxisValues, GCodeCommand, GCodeFormatSpecification, GCodeLine, GCodeModal, MoveMode,
@@ -14,6 +12,7 @@ use {
         error::{FromExternalError, ParseError},
         Finish, IResult, Parser,
     },
+    std::{collections::HashMap, num::ParseFloatError},
 };
 
 #[derive(Debug)]

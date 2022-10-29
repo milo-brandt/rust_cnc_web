@@ -65,6 +65,9 @@ pub fn DebugPage(cx: Scope) -> View<DomNode> {
         .history .warning {
             color: red;
         }
+        .history .comment {
+            color: lime;
+        }
         .input {
             flex-grow: 0;
             flex-shrink: 0;
@@ -161,6 +164,8 @@ pub fn DebugPage(cx: Scope) -> View<DomNode> {
                             "outgoing"
                         } else if x.starts_with("! ") {
                             "warning"
+                        } else if x.starts_with("~ ") {
+                            "comment"
                         } else {
                             "incoming"
                         };

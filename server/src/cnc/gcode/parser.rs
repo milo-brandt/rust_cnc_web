@@ -20,6 +20,16 @@ pub struct GCodeParseError<'a> {
     pub remaining: &'a str,
     pub description: String,
 }
+#[derive(Debug)]
+pub struct GCodeParseErrorOwned {
+    pub remaining: String,
+    pub description: String,
+}
+impl<'a> GCodeParseError<'a> {
+    pub fn into_owned(self) -> GCodeParseErrorOwned {
+        GCodeParseErrorOwned { remaining: self.remaining.to_string(), description: self.description }
+    }
+}
 impl<'a> ParseError<&'a str> for GCodeParseError<'a> {
     fn from_error_kind(input: &'a str, _kind: nom::error::ErrorKind) -> Self {
         GCodeParseError {

@@ -9,6 +9,7 @@ use {
         extract::{
             ws::{Message, WebSocket, WebSocketUpgrade},
             RawBody,
+            Json,
         },
         response::Response,
         routing::{get, post},
@@ -32,7 +33,7 @@ use {
         stream::{SplitStream, StreamExt},
     },
     std::{str::from_utf8_unchecked, sync::Arc, time::Duration},
-    tokio::{join, select, sync::oneshot, time::sleep},
+    tokio::{join, select, sync::oneshot, time::sleep, fs::File, io::{AsyncBufReadExt, BufReader}},
     tower_http::cors::{Any, CorsLayer},
 };
 
@@ -51,8 +52,9 @@ async fn main() {
     let machine = start_machine(reader, writer).await.unwrap();
     // build our application with a single route
     let app = Router::new()
+        .route("/job/run_file", post(run_gcode_file))
         .route("/debug/send", post(index))
-        .route("/job/run_gcode", post(run_gcode))
+        .route("/debug/gcode_job", post(run_gcode))
         .route("/debug/listen_raw", get(listen_raw))
         .route("/debug/listen_status", get(listen_status))
         //.route("/ws", get(websocket_upgrade))
@@ -211,24 +213,6 @@ async fn run_gcode(
         }
     };
     let total_lines = lines.len();
-    /*let result = broker.try_send_job(move |handle: MachineHandle, job_inner: JobInnerHandle| async move {
-        for (index, line) in lines.into_iter().enumerate() {
-            job_inner.return_stream.send(MessageFromJob::Status(format!("Sent line {}/{}", index, total_lines))).await.unwrap();
-            match line {
-                GeneralizedLineOwned::Line(line) => {
-                    let (sender, receiver) = oneshot::channel();
-                    let data = format!("{}\n", spec.format_line(&line)).into_bytes();
-                    handle.write_stream.send(WriteRequest::Plain { data , result: sender }).await.unwrap();
-                    receiver.await.unwrap().unwrap();
-                },
-                GeneralizedLineOwned::Comment(comment) => handle.write_stream.send(WriteRequest::Comment(comment.to_string())).await.unwrap(),
-                GeneralizedLineOwned::Empty => {},
-            }
-        }
-    }, MachineHandle {
-        write_stream: machine.write_stream.clone(),
-        immediate_write_stream: machine.immediate_write_stream.clone(),
-    });*/
     let result = broker.try_send_job(
         StreamJob::new(
             stream! {
@@ -248,6 +232,92 @@ async fn run_gcode(
         Err(_) => "Job not sent!".to_string(),
     }
 }
+
+use itertools::Itertools;
+use serde::Deserialize;
+
+#[derive(Deserialize)]
+struct RunGcodeFile {
+    path: String
+}
+async fn run_gcode_file(
+    message: Json<RunGcodeFile>,
+    broker: Extension<Arc<Broker>>,
+    machine: Extension<Arc<MachineInterface>>,
+) -> String {
+    println!("I'm supposed to do stuff with {}", message.path);
+    // Obviously vulnerable. Fix.
+    let spec = default_settings();
+    let mut line_count = 0;
+    {
+        let file = match File::open(format!("gcode/{}", message.path)).await {
+            Ok(file) => file,
+            Err(e) => return format!("Error! {:?}", e),
+        };
+        let file = BufReader::new(file);
+        let mut lines = file.lines();
+        let mut errors = Vec::new();
+        loop {
+            match lines.next_line().await {
+                Ok(Some(line)) => {
+                    match parse_generalized_line(&spec, &line) {
+                        Ok(_) => {}, // Ignore for now
+                        Err(e) => errors.push((line_count + 1, e.into_owned())),
+                    }
+                },
+                Ok(None) => break,
+                Err(e) => return format!("Error reading line {}! {:?}", line_count + 1, e),
+            }
+            line_count += 1;
+        }
+        if !errors.is_empty() {
+            return format!(
+                "Encountered errors in file \"{}\"!\n{}",
+                message.path,
+                errors.into_iter().map(|(line_num, error)|
+                    format!("Line {}: {}\n", line_num, error.description)
+                ).format("")
+            )
+        }
+    }
+    let result = broker.try_send_job(
+        StreamJob::new(
+            stream! {
+                let file = match File::open(format!("gcode/{}", message.path)).await {
+                    Ok(file) => file,
+                    Err(e) => {
+                        yield GeneralizedLineOwned::Comment("couldn't open file!".to_string());
+                        return
+                    },
+                };            
+                let file = BufReader::new(file);
+                let mut lines = file.lines();
+                loop {
+                    match lines.next_line().await {
+                        Ok(Some(line)) => {
+                            match parse_generalized_line(&spec, &line) {
+                                Ok(line) => yield line.into_owned(), // Ignore for now
+                                Err(e) => return,
+                            }
+                        },
+                        Ok(None) => return,
+                        Err(e) => return,
+                    }            
+                }
+            },
+            line_count,
+        ),
+        MachineHandle {
+            write_stream: machine.write_stream.clone(),
+            immediate_write_stream: machine.immediate_write_stream.clone(),
+        },
+    );
+    match result {
+        Ok(()) => "Job sent!".to_string(),
+        Err(_) => "Job not sent!".to_string(),
+    }
+}
+
 
 async fn listen_status(ws: WebSocketUpgrade, broker: Extension<Arc<Broker>>) -> Response {
     let mut debug_receiver = broker.watch_status();

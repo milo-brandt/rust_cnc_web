@@ -1,7 +1,7 @@
 use std::mem::forget;
 use std::sync::Arc;
 
-use futures::future::Fuse;
+use futures::future::{Fuse, FusedFuture};
 use reqwasm::websocket::{futures::WebSocket, Message};
 use reqwasm::http::Request;
 use sycamore::prelude::*;
@@ -38,7 +38,7 @@ pub fn DebugPage(cx: Scope) -> View<DomNode> {
     let css_style = style! { r#"
         display: flex;
         flex-direction: column;
-        height: 80vh;
+        height: 70vh;
         align-items: stretch;
         background-color: red;
 
@@ -95,17 +95,15 @@ pub fn DebugPage(cx: Scope) -> View<DomNode> {
             let mut ws_next = ws.next().fuse();
             let mut values = vec![];
             let mut next_update = Fuse::terminated(); //sleep(Duration::from_millis(0)).fuse();
-            let mut pending_update = false;
             loop {
                 select! {
-                    next_message = ws_next => {
+                    next_message = &mut ws_next => {
                         ws_next = ws.next().fuse();
                         match next_message {
                             Some(Ok(Message::Text(ws_message))) => {
                                 log::debug!("Received: {:?}", ws_message);
                                 values.push(ws_message);
-                                if !pending_update {
-                                    pending_update = true;
+                                if next_update.is_terminated() {
                                     next_update = sleep(Duration::from_millis(10)).fuse();
                                 }
                             }
@@ -117,7 +115,6 @@ pub fn DebugPage(cx: Scope) -> View<DomNode> {
                     },
                     _ = &mut next_update => {
                         log::debug!("Updating!");
-                        pending_update = false;
                         message_list_sender.set(values.clone());
                     }
                 }

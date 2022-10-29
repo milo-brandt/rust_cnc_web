@@ -2,10 +2,10 @@ use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 
 use async_trait::async_trait;
 use axum::extract::ws::Message;
-use futures::{Future, future::Fuse, FutureExt};
+use futures::{Future, future::Fuse, FutureExt, Stream, StreamExt, pin_mut};
 use tokio::{sync::{mpsc, watch}, spawn, task::JoinHandle, select};
 
-use super::grbl::new_machine::{ImmediateRequest, MachineInterface, MachineDebugEvent, WriteRequest};
+use super::{grbl::new_machine::{ImmediateRequest, MachineInterface, MachineDebugEvent, WriteRequest}, gcode::parser::GeneralizedLineOwned};
 
 pub struct MachineHandle {
     pub write_stream: mpsc::Sender<WriteRequest>,
@@ -44,8 +44,46 @@ where
         });
     }
 }
-
-
+struct StreamJob<S>(S);
+impl<S> StreamJob<S>
+where
+    S: Stream<Item=GeneralizedLineOwned> + Send + 'static
+{
+    fn new(stream: S) -> Self {
+        StreamJob(stream)
+    }
+}
+impl<S> Job for StreamJob<S>
+where
+    S: Stream<Item=GeneralizedLineOwned> + Send + 'static
+{
+    fn run(self, handle: MachineHandle, mut job_handle: JobInnerHandle) {
+        let sender_copy = job_handle.return_stream.clone();
+        let stream = self.0;
+        spawn(async move {
+            pin_mut!(stream);
+            let mut next_stream_future = stream.next();
+            select! {
+                next_value = &mut next_stream_future => {
+                    match next_value {
+                        Some(v) => {
+                            next_stream_future = stream.next();
+                        }
+                        None => { return; }
+                    }
+                },
+                message = job_handle.command_stream.recv() => {
+                    match message {
+                        Some(MessageToJob::RequestStop) => {
+                            return;
+                        }
+                        _ => {},
+                    }
+                }
+            };
+        });
+    }
+}
 #[derive(Debug)]
 pub enum MessageToJob {
     FeedHeld, // Job is not responsible for holding feed; merely notified of it.
@@ -60,7 +98,7 @@ pub enum MessageFromJob {
 
 pub struct Broker {
     is_busy: Arc<AtomicBool>,
-    last_status: watch::Receiver<Arc<String>>,
+    last_status: watch::Receiver<String>,
     message_sender: Option<mpsc::Sender<MessageToJob>>,
     new_job_sender: mpsc::Sender<mpsc::Receiver<MessageFromJob>>,
     broker_task: JoinHandle<()>,
@@ -68,7 +106,7 @@ pub struct Broker {
 impl Broker {
     pub fn new() -> Self {
         let (new_job_sender, mut new_job_receiver) = mpsc::channel(8);
-        let (watch_sender, watch_receiver) = watch::channel(Arc::new("Idle".to_string()));
+        let (watch_sender, watch_receiver) = watch::channel("Idle".to_string());
         let is_busy = Arc::new(AtomicBool::new(false));
         let is_busy_clone = is_busy.clone();
         let broker_task = spawn(async move {
@@ -77,7 +115,7 @@ impl Broker {
                 select! {
                     new_job = new_job_receiver.recv() => {
                         if let Some(new_job) = new_job {
-                            println!("New job detected!");
+                            watch_sender.send_replace("Beginning new job...".to_string());
                             current_job = Some(new_job);
                         }
                     }
@@ -85,10 +123,10 @@ impl Broker {
                         match job_message {
                             Some(MessageFromJob::Complete) => {
                                 is_busy_clone.store(false, Ordering::SeqCst);
-                                watch_sender.send(Arc::new("Idle".to_string())).unwrap();
+                                watch_sender.send_replace("Idle".to_string());
                             },
                             Some(MessageFromJob::Status(status)) => {
-                                watch_sender.send(Arc::new(status)).unwrap();
+                                watch_sender.send_replace(status);
                             },
                             _ => {}
                         };
@@ -114,7 +152,7 @@ impl Broker {
             Err(job)
         }
     }
-    pub fn watch_status(&self) -> watch::Receiver<Arc<String>> {
+    pub fn watch_status(&self) -> watch::Receiver<String> {
         self.last_status.clone()
     }
 }

@@ -6,7 +6,7 @@ mod util;
 use std::{str::from_utf8_unchecked, time::Duration};
 
 use axum::body;
-use cnc::{grbl::new_machine::{ImmediateRequest, WriteRequest}, gcode::{parser::parse_gcode_line, GCodeFormatSpecification}, broker::{Broker, MachineHandle, MessageFromJob, JobInnerHandle}};
+use cnc::{grbl::new_machine::{ImmediateRequest, WriteRequest}, gcode::{parser::{parse_gcode_line, parse_generalized_line, GeneralizedLine, GCodeParseError, GeneralizedLineOwned}, GCodeFormatSpecification}, broker::{Broker, MachineHandle, MessageFromJob, JobInnerHandle}};
 use tokio::time::sleep;
 
 use {
@@ -50,7 +50,7 @@ async fn main() {
     // build our application with a single route
     let app = Router::new()
         .route("/debug/send", post(index))
-        .route("/debug/send_job", post(send_job))
+        .route("/job/run_gcode", post(run_gcode))
         .route("/debug/listen_raw", get(listen_raw))
         .route("/debug/listen_status", get(listen_status))
         //.route("/ws", get(websocket_upgrade))
@@ -100,7 +100,8 @@ async fn listen_raw(ws: WebSocketUpgrade, machine: Extension<Arc<MachineInterfac
                             let message = match event {
                                 MachineDebugEvent::Sent(str) => format!("> {}", unsafe { from_utf8_unchecked(&str) }),
                                 MachineDebugEvent::Received(str) => format!("< {}", str),
-                                MachineDebugEvent::Warning(str) => format!("! {}", str)
+                                MachineDebugEvent::Warning(str) => format!("! {}", str),
+                                MachineDebugEvent::Comment(str) => format!("~ {}", str),
                             };
                             if writer.send(Message::Text(message)).await.is_err() {
                                 break
@@ -183,21 +184,38 @@ async fn index(message: RawBody, machine: Extension<Arc<MachineInterface>>) -> S
         }
     }
 }
-async fn send_job(message: RawBody, machine: Extension<Arc<MachineInterface>>, broker: Extension<Arc<Broker>>) -> String {
-    let mut body_bytes = hyper::body::to_bytes(message.0).await.unwrap().to_vec();
-    body_bytes.push(b'\n');
+async fn run_gcode(message: RawBody, machine: Extension<Arc<MachineInterface>>, broker: Extension<Arc<Broker>>) -> String {
+    let mut body_bytes = hyper::body::to_bytes(message.0).await.unwrap();
+    let body = std::str::from_utf8(&body_bytes).unwrap();
+    let spec = default_settings();
+    let lines: Result<Vec<GeneralizedLineOwned>, (usize, GCodeParseError)> =
+        body.lines()
+        .enumerate()
+        .map(|(index, line)|
+            parse_generalized_line(&spec, line)
+            .map(GeneralizedLine::into_owned)
+            .map_err(|e| (index, e))
+        )
+        .collect();
+    let lines = match lines {
+        Ok(lines) => lines,
+        Err((error_index, error)) => return format!("Error on line {} of input!\n{:?}\n", error_index + 1, error),
+    };
+    let total_lines = lines.len();
     let result = broker.try_send_job(move |handle: MachineHandle, job_inner: JobInnerHandle| async move {
-        let (sender, receiver) = oneshot::channel();
-        job_inner.return_stream.send(MessageFromJob::Status("About to send!".to_string())).await.unwrap();
-        handle.write_stream.send(WriteRequest::Plain {
-            data: body_bytes,
-            result: sender
-        }).await.unwrap();
-        job_inner.return_stream.send(MessageFromJob::Status("Sent!".to_string())).await.unwrap();
-        receiver.await.unwrap().unwrap();
-        job_inner.return_stream.send(MessageFromJob::Status("Done!".to_string())).await.unwrap();
-        sleep(Duration::from_millis(500)).await;
-        job_inner.return_stream.send(MessageFromJob::Status("Done sleeping!".to_string())).await.unwrap();
+        for (index, line) in lines.into_iter().enumerate() {
+            job_inner.return_stream.send(MessageFromJob::Status(format!("Sent line {}/{}", index, total_lines))).await.unwrap();
+            match line {
+                GeneralizedLineOwned::Line(line) => {
+                    let (sender, receiver) = oneshot::channel();
+                    let data = format!("{}\n", spec.format_line(&line)).into_bytes();
+                    handle.write_stream.send(WriteRequest::Plain { data , result: sender }).await.unwrap();
+                    receiver.await.unwrap().unwrap();
+                },
+                GeneralizedLineOwned::Comment(comment) => handle.write_stream.send(WriteRequest::Comment(comment.to_string())).await.unwrap(),
+                GeneralizedLineOwned::Empty => {},
+            }
+        }
     }, MachineHandle {
         write_stream: machine.write_stream.clone(),
         immediate_write_stream: machine.immediate_write_stream.clone(),
@@ -215,11 +233,16 @@ async fn listen_status(ws: WebSocketUpgrade, broker: Extension<Arc<Broker>>) -> 
         let (closer, mut close_listen) = oneshot::channel::<()>();
         let (writer, reader) = join! {
             async move {
+                // Make sure we send a first message
+                let status = debug_receiver.borrow().clone();
+                if writer.send(Message::Text(status)).await.is_err() {
+                    return writer
+                }
                 loop {
                     select! {
                         event = debug_receiver.changed() => {
                             let status = debug_receiver.borrow().clone();
-                            if writer.send(Message::Text((*status).clone())).await.is_err() {
+                            if writer.send(Message::Text(status)).await.is_err() {
                                 break
                             }
                             sleep(Duration::from_millis(100)).await; //Limit events to once per 100 ms. A little hacky - won't hear close_listen till later.

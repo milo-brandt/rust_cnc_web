@@ -535,6 +535,21 @@ pub fn parse_generalized_line<'a>(
         .finish()
         .map(|(_i, o)| o)
 }
+#[derive(Debug)]
+pub enum GeneralizedLineOwned {
+    Line(GCodeLine),
+    Comment(String),
+    Empty,
+}
+impl<'a> GeneralizedLine<'a> {
+    pub fn into_owned(self) -> GeneralizedLineOwned {
+        match self {
+            GeneralizedLine::Line(line) => GeneralizedLineOwned::Line(line),
+            GeneralizedLine::Comment(comment) => GeneralizedLineOwned::Comment(comment.to_string()),
+            GeneralizedLine::Empty => GeneralizedLineOwned::Empty,
+        }
+    }
+}
 
 #[cfg(test)]
 mod test {

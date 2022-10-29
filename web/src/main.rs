@@ -1,6 +1,7 @@
 mod utils;
 mod mdc;
 mod debug_page;
+mod status_header;
 use sycamore::prelude::*;
 
 use reqwasm::websocket::{futures::WebSocket, Message};
@@ -15,6 +16,7 @@ use std::rc::Rc;
 use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
 use mdc::CircularProgress;
+use status_header::StatusHeader;
 
 use std::time::Duration;
 
@@ -257,6 +259,7 @@ fn main() {
     wasm_logger::init(wasm_logger::Config::default());
     sycamore::render(|cx| {
         view! { cx,
+            StatusHeader
             Router(
                 integration=HistoryIntegration::new(),
                 view=|cx, route: &ReadSignal<AppRoutes>| {

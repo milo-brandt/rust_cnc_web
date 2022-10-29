@@ -24,6 +24,7 @@ pub enum MachineDebugEvent {
     Sent(Vec<u8>),
     Received(String),
     Warning(String),
+    Comment(String),
 }
 
 #[derive(Debug)]
@@ -37,6 +38,7 @@ pub enum WriteRequest {
         result_ok: oneshot::Sender<Result<(), u64>>, // gives error code on failure
         result: oneshot::Sender<Result<ProbeEvent, u64>>, // gives error code on failure
     },
+    Comment(String),
 }
 #[derive(Debug)]
 pub enum ImmediateRequest {
@@ -152,6 +154,7 @@ impl<Write: AsyncWrite + Unpin> MachineThread<Write> {
                 self.waiting_ok.push_back(result_ok);
                 self.waiting_probe.push_back(result);
             }
+            WriteRequest::Comment(comment) => self.debug_stream.send(MachineDebugEvent::Comment(comment)),
         }
     }
     async fn rerequest_status(&mut self) {

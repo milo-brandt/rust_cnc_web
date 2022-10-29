@@ -5,6 +5,7 @@ mod util;
 
 use std::{str::from_utf8_unchecked, time::Duration};
 
+use async_stream::stream;
 use axum::body;
 use cnc::{grbl::new_machine::{ImmediateRequest, WriteRequest}, gcode::{parser::{parse_gcode_line, parse_generalized_line, GeneralizedLine, GCodeParseError, GeneralizedLineOwned}, GCodeFormatSpecification}, broker::{Broker, MachineHandle, MessageFromJob, JobInnerHandle}};
 use tokio::time::sleep;
@@ -29,6 +30,7 @@ use {
 
 use {
     cnc::grbl::new_machine::{start_machine, MachineDebugEvent, MachineInterface},
+    cnc::broker::StreamJob,
     futures::stream::SplitStream,
     std::sync::Arc,
     tokio::select,
@@ -202,7 +204,7 @@ async fn run_gcode(message: RawBody, machine: Extension<Arc<MachineInterface>>, 
         Err((error_index, error)) => return format!("Error on line {} of input!\n{:?}\n", error_index + 1, error),
     };
     let total_lines = lines.len();
-    let result = broker.try_send_job(move |handle: MachineHandle, job_inner: JobInnerHandle| async move {
+    /*let result = broker.try_send_job(move |handle: MachineHandle, job_inner: JobInnerHandle| async move {
         for (index, line) in lines.into_iter().enumerate() {
             job_inner.return_stream.send(MessageFromJob::Status(format!("Sent line {}/{}", index, total_lines))).await.unwrap();
             match line {
@@ -217,6 +219,14 @@ async fn run_gcode(message: RawBody, machine: Extension<Arc<MachineInterface>>, 
             }
         }
     }, MachineHandle {
+        write_stream: machine.write_stream.clone(),
+        immediate_write_stream: machine.immediate_write_stream.clone(),
+    });*/
+    let result = broker.try_send_job(StreamJob::new(stream! {
+        for line in lines.into_iter() {
+            yield line;
+        }
+    }, total_lines), MachineHandle {
         write_stream: machine.write_stream.clone(),
         immediate_write_stream: machine.immediate_write_stream.clone(),
     });

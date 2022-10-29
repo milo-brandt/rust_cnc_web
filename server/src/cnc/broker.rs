@@ -3,7 +3,9 @@ use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use async_trait::async_trait;
 use axum::extract::ws::Message;
 use futures::{Future, future::Fuse, FutureExt, Stream, StreamExt, pin_mut};
-use tokio::{sync::{mpsc, watch}, spawn, task::JoinHandle, select};
+use tokio::{sync::{mpsc, watch, oneshot}, spawn, task::JoinHandle, select};
+
+use crate::default_settings;
 
 use super::{grbl::new_machine::{ImmediateRequest, MachineInterface, MachineDebugEvent, WriteRequest}, gcode::parser::GeneralizedLineOwned};
 
@@ -44,13 +46,13 @@ where
         });
     }
 }
-struct StreamJob<S>(S);
+pub struct StreamJob<S>(S, usize);
 impl<S> StreamJob<S>
 where
     S: Stream<Item=GeneralizedLineOwned> + Send + 'static
 {
-    fn new(stream: S) -> Self {
-        StreamJob(stream)
+    pub fn new(stream: S, size: usize) -> Self {
+        StreamJob(stream, size)
     }
 }
 impl<S> Job for StreamJob<S>
@@ -60,27 +62,50 @@ where
     fn run(self, handle: MachineHandle, mut job_handle: JobInnerHandle) {
         let sender_copy = job_handle.return_stream.clone();
         let stream = self.0;
+        let total_lines = self.1;
+        let spec = default_settings();
         spawn(async move {
             pin_mut!(stream);
             let mut next_stream_future = stream.next();
-            select! {
-                next_value = &mut next_stream_future => {
-                    match next_value {
-                        Some(v) => {
-                            next_stream_future = stream.next();
+            let mut commands_done = false;
+            let mut line_num = 0;
+            loop {
+                select! {
+                    next_value = &mut next_stream_future => {
+                        match next_value {
+                            Some(v) => {
+                                job_handle.return_stream.send(MessageFromJob::Status(format!("At line {}/{}", line_num, total_lines))).await.unwrap();
+                                line_num += 1;
+                                next_stream_future = stream.next();
+                                match v {
+                                    GeneralizedLineOwned::Line(line) => {
+                                        let (sender, receiver) = oneshot::channel();
+                                        let data = format!("{}\n", spec.format_line(&line)).into_bytes();
+                                        handle.write_stream.send(WriteRequest::Plain { data , result: sender }).await.unwrap();
+                                        receiver.await.unwrap().unwrap();
+                                    },
+                                    GeneralizedLineOwned::Comment(comment) => handle.write_stream.send(WriteRequest::Comment(comment.to_string())).await.unwrap(),
+                                    GeneralizedLineOwned::Empty => {},                                                
+                                }
+                            }
+                            None => { break }
                         }
-                        None => { return; }
-                    }
-                },
-                message = job_handle.command_stream.recv() => {
-                    match message {
-                        Some(MessageToJob::RequestStop) => {
-                            return;
+                    },
+                    message = job_handle.command_stream.recv(), if !commands_done => {
+                        println!("Got a message {:?}", message);
+                        match message {
+                            Some(MessageToJob::RequestStop) => {
+                                break
+                            }
+                            Some(_) => {},
+                            None => {
+                                commands_done = true;
+                            }
                         }
-                        _ => {},
                     }
                 }
-            };
+            }
+            drop(sender_copy.send(MessageFromJob::Complete).await);
         });
     }
 }

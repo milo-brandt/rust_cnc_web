@@ -98,7 +98,11 @@ where
                                         let (sender, receiver) = oneshot::channel();
                                         let data = format!("{}\n", spec.format_line(&line)).into_bytes();
                                         handle.write_stream.send(WriteRequest::Plain { data , result: sender }).await.unwrap();
-                                        receiver.await.unwrap().unwrap();
+                                        job_handle.return_stream.send(MessageFromJob::Status(format!("At line {}/{}", line_num, total_lines))).await.unwrap();
+                                        if let Err(e) = receiver.await.unwrap() {
+                                            handle.write_stream.send(WriteRequest::Comment(format!("Error in job! Line: {}\n{:?}\n", line_num + 1, e))).await.unwrap();
+                                            break;
+                                        }
                                     },
                                     GeneralizedLineOwned::Comment(comment) => handle.write_stream.send(WriteRequest::Comment(comment.to_string())).await.unwrap(),
                                     GeneralizedLineOwned::Empty => {},
@@ -108,7 +112,6 @@ where
                         }
                     },
                     message = job_handle.command_stream.recv(), if !commands_done => {
-                        println!("Got a message {:?}", message);
                         match message {
                             Some(MessageToJob::RequestStop) => {
                                 break

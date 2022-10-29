@@ -1,11 +1,12 @@
-use std::{
-    alloc::{alloc, Layout},
-    cmp::min,
-    mem::MaybeUninit,
-    sync::{Arc, RwLock},
+use {
+    std::{
+        alloc::{alloc, Layout},
+        cmp::min,
+        mem::MaybeUninit,
+        sync::{Arc, RwLock},
+    },
+    tokio::sync::Notify,
 };
-
-use tokio::sync::Notify;
 
 fn make_vec_uninit<T>(size: usize) -> Vec<MaybeUninit<T>> {
     let layout = Layout::array::<T>(size).unwrap();

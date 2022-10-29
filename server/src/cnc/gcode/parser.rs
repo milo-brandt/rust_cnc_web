@@ -1,6 +1,10 @@
 use std::{collections::HashMap, num::ParseFloatError};
 
 use {
+    super::{
+        AxisValues, GCodeCommand, GCodeFormatSpecification, GCodeLine, GCodeModal, MoveMode,
+        OffsetAxisValues, Orientation, ProbeDirection, ProbeRequirement,
+    },
     crate::cnc::gcode::{CoordinateMode, CoordinateSystem, Plane, SpindleMode, Unit},
     itertools::Itertools,
     nom::{
@@ -12,10 +16,6 @@ use {
     },
 };
 
-use super::{
-    AxisValues, GCodeCommand, GCodeFormatSpecification, GCodeLine, GCodeModal, MoveMode,
-    OffsetAxisValues, Orientation, ProbeDirection, ProbeRequirement,
-};
 #[derive(Debug)]
 pub struct GCodeParseError<'a> {
     pub remaining: &'a str,

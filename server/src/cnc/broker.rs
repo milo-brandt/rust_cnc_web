@@ -1,25 +1,32 @@
-use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
-
-use async_trait::async_trait;
-use axum::extract::ws::Message;
-use futures::{Future, future::Fuse, FutureExt, Stream, StreamExt, pin_mut};
-use tokio::{sync::{mpsc, watch, oneshot}, spawn, task::JoinHandle, select};
-
-use crate::default_settings;
-
-use super::{grbl::new_machine::{ImmediateRequest, MachineInterface, MachineDebugEvent, WriteRequest}, gcode::parser::GeneralizedLineOwned};
+use {
+    super::{
+        gcode::parser::GeneralizedLineOwned,
+        grbl::new_machine::{ImmediateRequest, WriteRequest},
+    },
+    crate::default_settings,
+    futures::{future::Fuse, pin_mut, Future, FutureExt, Stream, StreamExt},
+    std::sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    tokio::{
+        select, spawn,
+        sync::{mpsc, oneshot, watch},
+        task::JoinHandle,
+    },
+};
 
 pub struct MachineHandle {
     pub write_stream: mpsc::Sender<WriteRequest>,
-    pub immediate_write_stream: mpsc::Sender<ImmediateRequest>
+    pub immediate_write_stream: mpsc::Sender<ImmediateRequest>,
 }
 pub struct JobInnerHandle {
     pub command_stream: mpsc::Receiver<MessageToJob>,
-    pub return_stream: mpsc::Sender<MessageFromJob>
+    pub return_stream: mpsc::Sender<MessageFromJob>,
 }
 pub struct JobOuterHandle {
     pub command_stream: mpsc::Sender<MessageToJob>,
-    pub return_stream: mpsc::Receiver<MessageFromJob>
+    pub return_stream: mpsc::Receiver<MessageFromJob>,
 }
 
 pub trait Job: Sized {
@@ -27,15 +34,24 @@ pub trait Job: Sized {
     fn begin(self, handle: MachineHandle) -> JobOuterHandle {
         let (command_stream_sender, command_stream_receiver) = mpsc::channel(128);
         let (return_stream_send, return_stream_receive) = mpsc::channel(128);
-        self.run(handle, JobInnerHandle { command_stream: command_stream_receiver, return_stream: return_stream_send });
-        JobOuterHandle { command_stream: command_stream_sender, return_stream: return_stream_receive }
+        self.run(
+            handle,
+            JobInnerHandle {
+                command_stream: command_stream_receiver,
+                return_stream: return_stream_send,
+            },
+        );
+        JobOuterHandle {
+            command_stream: command_stream_sender,
+            return_stream: return_stream_receive,
+        }
     }
 }
 
 impl<F, JobFuture> Job for F
 where
     F: FnOnce(MachineHandle, JobInnerHandle) -> JobFuture,
-    JobFuture: Future<Output=()> + Send + 'static
+    JobFuture: Future<Output = ()> + Send + 'static,
 {
     fn run(self, handle: MachineHandle, job_handle: JobInnerHandle) {
         let sender_copy = job_handle.return_stream.clone();
@@ -49,7 +65,7 @@ where
 pub struct StreamJob<S>(S, usize);
 impl<S> StreamJob<S>
 where
-    S: Stream<Item=GeneralizedLineOwned> + Send + 'static
+    S: Stream<Item = GeneralizedLineOwned> + Send + 'static,
 {
     pub fn new(stream: S, size: usize) -> Self {
         StreamJob(stream, size)
@@ -57,7 +73,7 @@ where
 }
 impl<S> Job for StreamJob<S>
 where
-    S: Stream<Item=GeneralizedLineOwned> + Send + 'static
+    S: Stream<Item = GeneralizedLineOwned> + Send + 'static,
 {
     fn run(self, handle: MachineHandle, mut job_handle: JobInnerHandle) {
         let sender_copy = job_handle.return_stream.clone();
@@ -85,7 +101,7 @@ where
                                         receiver.await.unwrap().unwrap();
                                     },
                                     GeneralizedLineOwned::Comment(comment) => handle.write_stream.send(WriteRequest::Comment(comment.to_string())).await.unwrap(),
-                                    GeneralizedLineOwned::Empty => {},                                                
+                                    GeneralizedLineOwned::Empty => {},
                                 }
                             }
                             None => { break }
@@ -111,14 +127,14 @@ where
 }
 #[derive(Debug)]
 pub enum MessageToJob {
-    FeedHeld, // Job is not responsible for holding feed; merely notified of it.
+    FeedHeld,    // Job is not responsible for holding feed; merely notified of it.
     FeedResumed, // Also not responsible for resuming feed.
-    RequestStop
+    RequestStop,
 }
 #[derive(Debug)]
 pub enum MessageFromJob {
     Status(String),
-    Complete
+    Complete,
 }
 
 pub struct Broker {
@@ -164,14 +180,16 @@ impl Broker {
             last_status: watch_receiver,
             message_sender: None,
             new_job_sender,
-            broker_task
+            broker_task,
         }
     }
     pub fn try_send_job<J: Job>(&self, job: J, handle: MachineHandle) -> Result<(), J> {
         // Set self to busy; proceed only if previous value was false!
         if !self.is_busy.fetch_or(true, Ordering::SeqCst) {
             let job_handle = job.begin(handle);
-            self.new_job_sender.try_send(job_handle.return_stream).expect("Sending should work!");
+            self.new_job_sender
+                .try_send(job_handle.return_stream)
+                .expect("Sending should work!");
             Ok(())
         } else {
             Err(job)

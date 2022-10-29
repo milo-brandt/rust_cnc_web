@@ -3,14 +3,8 @@
 mod cnc;
 mod util;
 
-use std::{str::from_utf8_unchecked, time::Duration};
-
-use async_stream::stream;
-use axum::body;
-use cnc::{grbl::new_machine::{ImmediateRequest, WriteRequest}, gcode::{parser::{parse_gcode_line, parse_generalized_line, GeneralizedLine, GCodeParseError, GeneralizedLineOwned}, GCodeFormatSpecification}, broker::{Broker, MachineHandle, MessageFromJob, JobInnerHandle}};
-use tokio::time::sleep;
-
 use {
+    async_stream::stream,
     axum::{
         extract::{
             ws::{Message, WebSocket, WebSocketUpgrade},
@@ -20,20 +14,26 @@ use {
         routing::{get, post},
         Extension, Router,
     },
+    cnc::{
+        broker::{Broker, MachineHandle, StreamJob},
+        gcode::{
+            parser::{
+                parse_gcode_line, parse_generalized_line, GCodeParseError, GeneralizedLine,
+                GeneralizedLineOwned,
+            },
+            GCodeFormatSpecification,
+        },
+        grbl::new_machine::{
+            start_machine, ImmediateRequest, MachineDebugEvent, MachineInterface, WriteRequest,
+        },
+    },
+    futures::{
+        sink::SinkExt,
+        stream::{SplitStream, StreamExt},
+    },
+    std::{str::from_utf8_unchecked, sync::Arc, time::Duration},
+    tokio::{join, select, sync::oneshot, time::sleep},
     tower_http::cors::{Any, CorsLayer},
-};
-
-use {
-    futures::{sink::SinkExt, stream::StreamExt},
-    tokio::{join, sync::oneshot},
-};
-
-use {
-    cnc::grbl::new_machine::{start_machine, MachineDebugEvent, MachineInterface},
-    cnc::broker::StreamJob,
-    futures::stream::SplitStream,
-    std::sync::Arc,
-    tokio::select,
 };
 
 #[tokio::main]
@@ -158,14 +158,15 @@ async fn index(message: RawBody, machine: Extension<Arc<MachineInterface>>) -> S
     } else {
         let bytes = if !body_bytes.is_empty() && body_bytes[0] == b'\\' {
             body_bytes.push(b'\n');
-            (&body_bytes[1..]).to_vec()
+            body_bytes[1..].to_vec()
         } else {
             let line = unsafe { from_utf8_unchecked(&body_bytes) };
-            let gcode = parse_gcode_line(&default_settings(), &line);
+            let gcode = parse_gcode_line(&default_settings(), line);
             match gcode {
                 Ok(gcode_line) => format!("{}\n", default_settings().format_line(&gcode_line)),
                 Err(err) => return format!("Bad gcode: {:?}", err),
-            }.into_bytes()
+            }
+            .into_bytes()
         };
         //body_bytes.push(b'\n');
 
@@ -186,22 +187,28 @@ async fn index(message: RawBody, machine: Extension<Arc<MachineInterface>>) -> S
         }
     }
 }
-async fn run_gcode(message: RawBody, machine: Extension<Arc<MachineInterface>>, broker: Extension<Arc<Broker>>) -> String {
-    let mut body_bytes = hyper::body::to_bytes(message.0).await.unwrap();
+async fn run_gcode(
+    message: RawBody,
+    machine: Extension<Arc<MachineInterface>>,
+    broker: Extension<Arc<Broker>>,
+) -> String {
+    let body_bytes = hyper::body::to_bytes(message.0).await.unwrap();
     let body = std::str::from_utf8(&body_bytes).unwrap();
     let spec = default_settings();
-    let lines: Result<Vec<GeneralizedLineOwned>, (usize, GCodeParseError)> =
-        body.lines()
+    let lines: Result<Vec<GeneralizedLineOwned>, (usize, GCodeParseError)> = body
+        .lines()
         .enumerate()
-        .map(|(index, line)|
+        .map(|(index, line)| {
             parse_generalized_line(&spec, line)
-            .map(GeneralizedLine::into_owned)
-            .map_err(|e| (index, e))
-        )
+                .map(GeneralizedLine::into_owned)
+                .map_err(|e| (index, e))
+        })
         .collect();
     let lines = match lines {
         Ok(lines) => lines,
-        Err((error_index, error)) => return format!("Error on line {} of input!\n{:?}\n", error_index + 1, error),
+        Err((error_index, error)) => {
+            return format!("Error on line {} of input!\n{:?}\n", error_index + 1, error)
+        }
     };
     let total_lines = lines.len();
     /*let result = broker.try_send_job(move |handle: MachineHandle, job_inner: JobInnerHandle| async move {
@@ -222,14 +229,20 @@ async fn run_gcode(message: RawBody, machine: Extension<Arc<MachineInterface>>, 
         write_stream: machine.write_stream.clone(),
         immediate_write_stream: machine.immediate_write_stream.clone(),
     });*/
-    let result = broker.try_send_job(StreamJob::new(stream! {
-        for line in lines.into_iter() {
-            yield line;
-        }
-    }, total_lines), MachineHandle {
-        write_stream: machine.write_stream.clone(),
-        immediate_write_stream: machine.immediate_write_stream.clone(),
-    });
+    let result = broker.try_send_job(
+        StreamJob::new(
+            stream! {
+                for line in lines.into_iter() {
+                    yield line;
+                }
+            },
+            total_lines,
+        ),
+        MachineHandle {
+            write_stream: machine.write_stream.clone(),
+            immediate_write_stream: machine.immediate_write_stream.clone(),
+        },
+    );
     match result {
         Ok(()) => "Job sent!".to_string(),
         Err(_) => "Job not sent!".to_string(),
@@ -250,7 +263,7 @@ async fn listen_status(ws: WebSocketUpgrade, broker: Extension<Arc<Broker>>) -> 
                 }
                 loop {
                     select! {
-                        event = debug_receiver.changed() => {
+                        _event = debug_receiver.changed() => {
                             let status = debug_receiver.borrow().clone();
                             if writer.send(Message::Text(status)).await.is_err() {
                                 break

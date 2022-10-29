@@ -1,12 +1,15 @@
-use std::{collections::VecDeque, pin::Pin, time::Duration};
-
 use {
+    super::{
+        messages::{GrblMessage, GrblPosition, GrblStateInfo, ProbeEvent},
+        parser::parse_grbl_line,
+    },
     crate::util::history_broadcast,
     futures::{
         future::{Fuse, FusedFuture},
         FutureExt,
     },
     ndarray::Array1,
+    std::{collections::VecDeque, pin::Pin, time::Duration},
     tokio::{
         io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader},
         select, spawn,
@@ -15,10 +18,6 @@ use {
     },
 };
 
-use super::{
-    messages::{GrblMessage, GrblPosition, GrblStateInfo, ProbeEvent},
-    parser::parse_grbl_line,
-};
 #[derive(Clone, Debug)]
 pub enum MachineDebugEvent {
     Sent(Vec<u8>),
@@ -154,7 +153,9 @@ impl<Write: AsyncWrite + Unpin> MachineThread<Write> {
                 self.waiting_ok.push_back(result_ok);
                 self.waiting_probe.push_back(result);
             }
-            WriteRequest::Comment(comment) => self.debug_stream.send(MachineDebugEvent::Comment(comment)),
+            WriteRequest::Comment(comment) => {
+                self.debug_stream.send(MachineDebugEvent::Comment(comment))
+            }
         }
     }
     async fn rerequest_status(&mut self) {

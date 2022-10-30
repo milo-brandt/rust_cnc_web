@@ -55,6 +55,7 @@ async fn main() {
         .route("/job/run_file", post(run_gcode_file))
         .route("/debug/send", post(index))
         .route("/debug/gcode_job", post(run_gcode))
+        .route("/debug/gcode_unchecked_if_free", post(run_gcode_unchecked))
         .route("/debug/listen_raw", get(listen_raw))
         .route("/debug/listen_status", get(listen_status))
         //.route("/ws", get(websocket_upgrade))
@@ -232,7 +233,29 @@ async fn run_gcode(
         Err(_) => "Job not sent!".to_string(),
     }
 }
-
+async fn run_gcode_unchecked(  // Runs the line *if* no job is scheduled yet.
+    message: RawBody,
+    machine: Extension<Arc<MachineInterface>>,
+    broker: Extension<Arc<Broker>>,
+) -> String {
+    let mut body_bytes = hyper::body::to_bytes(message.0).await.unwrap().to_vec();
+    body_bytes.push(b'\n');
+    let result = broker.try_send_job(
+        move |handle: MachineHandle, job_handle: JobInnerHandle| async move {
+            handle.write_stream.send(WriteRequest::Plain { data: body_bytes, result: oneshot::channel().0 }).await.unwrap();
+        },
+        MachineHandle {
+            write_stream: machine.write_stream.clone(),
+            immediate_write_stream: machine.immediate_write_stream.clone(),
+        },
+    );
+    match result {
+        Ok(()) => "Job sent!".to_string(),
+        Err(_) => "Job not sent!".to_string(),
+    }
+}
+use axum::body;
+use cnc::broker::JobInnerHandle;
 use itertools::Itertools;
 use serde::Deserialize;
 

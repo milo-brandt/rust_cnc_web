@@ -1,3 +1,4 @@
+use std::io::Read;
 use std::mem::forget;
 use std::sync::Arc;
 
@@ -137,6 +138,7 @@ pub fn DebugPage(cx: Scope) -> View<DomNode> {
         v
     });
     let input_value = create_signal(cx, String::new());
+    let is_checked = create_signal(cx, true);
     let keydown_handler = |event: Event| {
         let keyboard_event: KeyboardEvent = event.unchecked_into();
         if keyboard_event.key() == "Enter" {
@@ -153,12 +155,16 @@ pub fn DebugPage(cx: Scope) -> View<DomNode> {
             input_value.set("".to_string());
         }
     };
-
+    let list = create_memo(cx, || if *is_checked.get() {
+        message_list_inner.get().iter().filter(|x| !x.starts_with("< <") && !x.starts_with("> ?")).map(String::from).collect()
+    } else {
+        (*message_list_inner.get()).clone()
+    });
     view! { cx,
         div(class=css_style.get_class_name()) {
             div(class="history") {
                 Indexed(
-                    iterable=message_list_inner,
+                    iterable=list,
                     view=|cx, x| {
                         let class_name = if x.starts_with("> ") {
                             "outgoing"
@@ -180,6 +186,10 @@ pub fn DebugPage(cx: Scope) -> View<DomNode> {
 
                 }
             }
+        }
+        div {
+            input(type="checkbox", bind:checked=is_checked)
+            label { "Hide status queries." }
         }
         a(href="/") { "Go home!" }
     }

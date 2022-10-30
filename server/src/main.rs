@@ -1,5 +1,12 @@
 #![allow(dead_code)]
 
+use std::{sync::Mutex, convert::Infallible};
+
+use axum::response::{sse::Event, Sse};
+use cnc::grbl::messages::{GrblStateInfo};
+use futures::{Stream, Future, pin_mut};
+use tokio::{sync::{mpsc, broadcast, watch}, spawn, time::MissedTickBehavior};
+
 mod cnc;
 mod util;
 
@@ -39,10 +46,83 @@ use {
         io::{AsyncBufReadExt, BufReader},
         join, select,
         sync::oneshot,
-        time::sleep,
+        time::{sleep, interval},
     },
     tower_http::cors::{Any, CorsLayer},
 };
+
+fn make_status_stream(machine: Arc<MachineInterface>) -> impl Stream<Item=GrblStateInfo> {
+    stream! {
+        let mut interval = interval(Duration::from_millis(250));
+        interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        loop {
+            interval.tick().await;
+            let (sender, receiver) = oneshot::channel();
+            machine.immediate_write_stream.send(ImmediateRequest::Status { result: sender }).await.unwrap();
+            yield receiver.await.unwrap();
+        }
+    }
+}
+
+struct StatusStreamInfo {
+    subscriber_sender: mpsc::Sender<oneshot::Sender<watch::Receiver<GrblStateInfo>>>
+}
+impl StatusStreamInfo {
+    async fn subscribe(&self) -> watch::Receiver<GrblStateInfo> {
+        let (sender, receiver) = oneshot::channel();
+        self.subscriber_sender.send(sender).await.unwrap();
+        receiver.await.unwrap()
+    }
+}
+async fn status_stream_task(machine: Arc<MachineInterface>) -> StatusStreamInfo {
+    let (sender, receiver) = oneshot::channel();
+    machine.immediate_write_stream.send(ImmediateRequest::Status { result: sender }).await.unwrap();
+    let (sender, _) = watch::channel(receiver.await.unwrap());
+    let (subscriber_sender, mut subscriber_receiver) = mpsc::channel::<oneshot::Sender<watch::Receiver<GrblStateInfo>>>(16);
+    spawn(async move {
+        let mut subscribers_closed = false;
+        while !subscribers_closed {
+            match subscriber_receiver.recv().await {
+                Some(subscriber) => {
+                    drop(subscriber.send(sender.subscribe()));
+                }
+                None => return
+            }
+            println!("Starting stream!");
+            let stream = make_status_stream(machine.clone());
+            pin_mut!(stream);
+            let mut next_stream = stream.next();
+            loop {
+                select! {
+                    new_subscriber = subscriber_receiver.recv(), if !subscribers_closed => {
+                        match new_subscriber {
+                            Some(new_subscriber) => drop(new_subscriber.send(sender.subscribe())),
+                            None => {
+                                subscribers_closed = true;
+                            }
+                        }
+                    },
+                    new_value = &mut next_stream => {
+                        next_stream = stream.next();
+                        match new_value {
+                            Some(new_value) => match sender.send(new_value) {
+                                Ok(()) => {}
+                                Err(_) => break // No listeners - stop computation...
+                            },
+                            None => return // Stream is done???
+                        }
+                    }
+                }
+            }
+            println!("No more subscribers!")
+        }
+    });
+    StatusStreamInfo {
+        subscriber_sender
+    }
+}
+
+
 
 #[tokio::main]
 async fn main() {
@@ -57,6 +137,8 @@ async fn main() {
     let (reader, writer) =
         cnc::connection::open_and_reset_arduino_like_serial("/dev/ttyUSB0").await;
     let machine = start_machine(reader, writer).await.unwrap();
+    let machine_arc = Arc::new(machine);
+    
     // build our application with a single route
     let app = Router::new()
         .route("/job/run_file", post(run_gcode_file))
@@ -65,10 +147,12 @@ async fn main() {
         .route("/debug/gcode_unchecked_if_free", post(run_gcode_unchecked))
         .route("/debug/listen_raw", get(listen_raw))
         .route("/debug/listen_status", get(listen_status))
+        .route("/debug/listen_machine_status", get(listen_machine_status))
         //.route("/ws", get(websocket_upgrade))
         .layer(cors)
-        .layer(Extension(Arc::new(machine)))
-        .layer(Extension(Arc::new(Broker::new())));
+        .layer(Extension(machine_arc.clone()))
+        .layer(Extension(Arc::new(Broker::new())))
+        .layer(Extension(Arc::new(status_stream_task(machine_arc).await)));
 
     // run it with hyper on localhost:3000
     println!("Listening on port 3000...");
@@ -78,25 +162,20 @@ async fn main() {
         .unwrap();
 }
 
-/* async fn listen_raw(machine: Extension<Arc<Machine>>) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    println!("Request to listen!");
-    let mut input_receiver = machine.raw_input_subscribe();
-    let mut output_receiver = machine.raw_output_subscribe();
+async fn listen_machine_status(status_stream: Extension<Arc<StatusStreamInfo>>) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    println!("Request to listen to status!");
+    let mut receiver = status_stream.subscribe().await;
     let result = stream! {
         loop {
-            let (is_output, value) = select! {
-                input = input_receiver.recv() => (false, input),
-                output = output_receiver.recv() => (true, output)
-            };
-            if let Ok(string) = value {
-                let prefix = if is_output { "> " } else { "< " };
-                yield Event::default().data(format!("{}{}", prefix, string));
+            let data = format!("[{}]", receiver.borrow().machine_position.indexed_iter().map(|(_, v)| v).format(", "));
+            yield Event::default().data(data);
+            if let Err(_) = receiver.changed().await {
+                break
             }
         }
     }.map(Ok);
-
-    Sse::new(result).keep_alive(KeepAlive::default())
-} */
+    Sse::new(result)
+}
 
 async fn listen_raw(ws: WebSocketUpgrade, machine: Extension<Arc<MachineInterface>>) -> Response {
     let mut debug_receiver = machine.debug_stream.subscribe_with_history_count(100);
@@ -281,7 +360,7 @@ async fn run_gcode_file(
 ) -> String {
     if !message.path.chars().all(|c|
         c.is_ascii_alphanumeric()
-        || c == '_'
+        || c == '_' || c == '.'
     ) {
         return "Illegal path!".to_string();
     }

@@ -160,7 +160,7 @@ impl<Write: AsyncWrite + Unpin> MachineThread<Write> {
     }
     async fn rerequest_status(&mut self) {
         self.write_bytes(vec![b'?']).await.unwrap();
-        self.status_refresh = Box::pin(sleep(Duration::from_millis(50)).fuse());
+        self.status_refresh = Box::pin(sleep(Duration::from_millis(1000)).fuse());
         self.debug_stream.send(MachineDebugEvent::Warning(
             "Needed to resend status query!".to_string(),
         ));
@@ -170,9 +170,10 @@ impl<Write: AsyncWrite + Unpin> MachineThread<Write> {
             ImmediateRequest::Status { result } => {
                 self.waiting_status.push_back(result);
                 if self.status_refresh.is_terminated() {
-                    // Nominally required for grbl interface - can get cancelled time to time
+                    // Nominally required for grbl interface - can get cancelled time to time.
+                    // Waits 1000 ms for response to ? before resending; note that faster polling is allowed if the response has come back.
                     self.write_bytes(vec![b'?']).await.unwrap();
-                    self.status_refresh = Box::pin(sleep(Duration::from_millis(50)).fuse());
+                    self.status_refresh = Box::pin(sleep(Duration::from_millis(1000)).fuse());
                 }
             }
         }
@@ -236,6 +237,7 @@ pub async fn start_machine<
         };
         loop {
             select! {
+                biased;
                 line = lines_reader.next_line() => {
                     if let Ok(Some(line)) = line {
                         machine_thread.receive_line(line).await

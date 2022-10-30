@@ -279,8 +279,12 @@ async fn run_gcode_file(
     broker: Extension<Arc<Broker>>,
     machine: Extension<Arc<MachineInterface>>,
 ) -> String {
-    println!("I'm supposed to do stuff with {}", message.path);
-    // Obviously vulnerable. Fix.
+    if !message.path.chars().all(|c|
+        c.is_ascii_alphanumeric()
+        || c == '_'
+    ) {
+        return "Illegal path!".to_string();
+    }
     let spec = default_settings();
     let mut line_count = 0;
     {

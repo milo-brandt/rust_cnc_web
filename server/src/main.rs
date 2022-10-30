@@ -2,10 +2,10 @@
 
 use std::{sync::Mutex, convert::Infallible};
 
-use axum::response::{sse::Event, Sse};
+use axum::{response::{sse::Event, Sse}, extract::{multipart::Field, ContentLengthLimit}};
 use cnc::grbl::messages::{GrblStateInfo};
 use futures::{Stream, Future, pin_mut};
-use tokio::{sync::{mpsc, broadcast, watch}, spawn, time::MissedTickBehavior};
+use tokio::{sync::{mpsc, broadcast, watch}, spawn, time::MissedTickBehavior, io::AsyncWriteExt};
 
 mod cnc;
 mod util;
@@ -15,7 +15,7 @@ use {
     axum::{
         extract::{
             ws::{Message, WebSocket, WebSocketUpgrade},
-            Json, RawBody,
+            Json, RawBody, Multipart
         },
         response::Response,
         routing::{get, post},
@@ -42,7 +42,7 @@ use {
     serde::Deserialize,
     std::{str::from_utf8_unchecked, sync::Arc, time::Duration},
     tokio::{
-        fs::File,
+        fs::{File, OpenOptions},
         io::{AsyncBufReadExt, BufReader},
         join, select,
         sync::oneshot,
@@ -148,6 +148,7 @@ async fn main() {
         .route("/debug/listen_raw", get(listen_raw))
         .route("/debug/listen_status", get(listen_status))
         .route("/debug/listen_machine_status", get(listen_machine_status))
+        .route("/upload", post(upload))
         //.route("/ws", get(websocket_upgrade))
         .layer(cors)
         .layer(Extension(machine_arc.clone()))
@@ -480,4 +481,42 @@ async fn listen_status(ws: WebSocketUpgrade, broker: Extension<Arc<Broker>>) -> 
         let together = reader.reunite(writer).unwrap();
         drop(together.close().await);
     })
+}
+
+
+async fn dump_field_to_file(mut file: File, mut field: Field<'_>) {
+    while let Some(bytes) = field.chunk().await.unwrap() {
+        file.write_all(&bytes).await.unwrap();
+    }
+}
+
+// Limits file size to 128 MiB.
+async fn upload(multipart: ContentLengthLimit<Multipart, 134217728>) -> String {
+    let mut multipart = multipart.0;
+    let mut file_name = None;
+    while let Some(field) = multipart.next_field().await.unwrap() {
+        let name = field.name().unwrap().to_string();
+        if name == "file" {
+            match file_name.take() {
+                None => return "Filename not given before file!".to_string(),
+                Some(file_name) => {
+                    dump_field_to_file(
+                        File::create(format!("gcode/{}", file_name)).await.unwrap(),
+                        field
+                    ).await
+                }
+            }
+            return "Uploaded!".to_string();
+        } else if name == "filename" {
+            let presumptive_name = field.text().await.unwrap();
+            if !presumptive_name.chars().all(|c|
+                c.is_ascii_alphanumeric()
+                || c == '_' || c == '.'
+            ) || presumptive_name.len() > 255 {
+                return "Illegal filename!".to_string();
+            }
+            file_name = Some(presumptive_name);
+        }
+    }
+    "File not given!".to_string()
 }

@@ -5,7 +5,7 @@ use std::{sync::Mutex, convert::Infallible};
 use axum::{response::{sse::Event, Sse}, extract::{multipart::Field, ContentLengthLimit}};
 use cnc::grbl::messages::{GrblStateInfo};
 use futures::{Stream, Future, pin_mut};
-use tokio::{sync::{mpsc, broadcast, watch}, spawn, time::MissedTickBehavior, io::AsyncWriteExt};
+use tokio::{sync::{mpsc, broadcast, watch}, spawn, time::MissedTickBehavior, io::AsyncWriteExt, fs::read_dir};
 
 mod cnc;
 mod util;
@@ -149,6 +149,7 @@ async fn main() {
         .route("/debug/listen_status", get(listen_status))
         .route("/debug/listen_machine_status", get(listen_machine_status))
         .route("/upload", post(upload))
+        .route("/list_files", get(get_gcode_list))
         //.route("/ws", get(websocket_upgrade))
         .layer(cors)
         .layer(Extension(machine_arc.clone()))
@@ -519,4 +520,13 @@ async fn upload(multipart: ContentLengthLimit<Multipart, 134217728>) -> String {
         }
     }
     "File not given!".to_string()
+}
+
+async fn get_gcode_list() -> Json<Vec<String>> {
+    let mut entries = read_dir("gcode").await.unwrap();
+    let mut values = Vec::new();
+    while let Some(entry) = entries.next_entry().await.unwrap() {
+        values.push(entry.file_name().into_string().unwrap());
+    }
+    Json(values)
 }

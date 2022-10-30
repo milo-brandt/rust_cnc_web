@@ -27,7 +27,10 @@ pub struct GCodeParseErrorOwned {
 }
 impl<'a> GCodeParseError<'a> {
     pub fn into_owned(self) -> GCodeParseErrorOwned {
-        GCodeParseErrorOwned { remaining: self.remaining.to_string(), description: self.description }
+        GCodeParseErrorOwned {
+            remaining: self.remaining.to_string(),
+            description: self.description,
+        }
     }
 }
 impl<'a> ParseError<&'a str> for GCodeParseError<'a> {

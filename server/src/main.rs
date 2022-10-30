@@ -8,15 +8,14 @@ use {
     axum::{
         extract::{
             ws::{Message, WebSocket, WebSocketUpgrade},
-            RawBody,
-            Json,
+            Json, RawBody,
         },
         response::Response,
         routing::{get, post},
         Extension, Router,
     },
     cnc::{
-        broker::{Broker, MachineHandle, StreamJob},
+        broker::{Broker, JobInnerHandle, MachineHandle, StreamJob},
         gcode::{
             parser::{
                 parse_gcode_line, parse_generalized_line, GCodeParseError, GeneralizedLine,
@@ -32,8 +31,16 @@ use {
         sink::SinkExt,
         stream::{SplitStream, StreamExt},
     },
+    itertools::Itertools,
+    serde::Deserialize,
     std::{str::from_utf8_unchecked, sync::Arc, time::Duration},
-    tokio::{join, select, sync::oneshot, time::sleep, fs::File, io::{AsyncBufReadExt, BufReader}},
+    tokio::{
+        fs::File,
+        io::{AsyncBufReadExt, BufReader},
+        join, select,
+        sync::oneshot,
+        time::sleep,
+    },
     tower_http::cors::{Any, CorsLayer},
 };
 
@@ -233,7 +240,8 @@ async fn run_gcode(
         Err(_) => "Job not sent!".to_string(),
     }
 }
-async fn run_gcode_unchecked(  // Runs the line *if* no job is scheduled yet.
+async fn run_gcode_unchecked(
+    // Runs the line *if* no job is scheduled yet.
     message: RawBody,
     machine: Extension<Arc<MachineInterface>>,
     broker: Extension<Arc<Broker>>,
@@ -241,8 +249,15 @@ async fn run_gcode_unchecked(  // Runs the line *if* no job is scheduled yet.
     let mut body_bytes = hyper::body::to_bytes(message.0).await.unwrap().to_vec();
     body_bytes.push(b'\n');
     let result = broker.try_send_job(
-        move |handle: MachineHandle, job_handle: JobInnerHandle| async move {
-            handle.write_stream.send(WriteRequest::Plain { data: body_bytes, result: oneshot::channel().0 }).await.unwrap();
+        move |handle: MachineHandle, _job_handle: JobInnerHandle| async move {
+            handle
+                .write_stream
+                .send(WriteRequest::Plain {
+                    data: body_bytes,
+                    result: oneshot::channel().0,
+                })
+                .await
+                .unwrap();
         },
         MachineHandle {
             write_stream: machine.write_stream.clone(),
@@ -254,14 +269,10 @@ async fn run_gcode_unchecked(  // Runs the line *if* no job is scheduled yet.
         Err(_) => "Job not sent!".to_string(),
     }
 }
-use axum::body;
-use cnc::broker::JobInnerHandle;
-use itertools::Itertools;
-use serde::Deserialize;
 
 #[derive(Deserialize)]
 struct RunGcodeFile {
-    path: String
+    path: String,
 }
 async fn run_gcode_file(
     message: Json<RunGcodeFile>,
@@ -284,10 +295,10 @@ async fn run_gcode_file(
             match lines.next_line().await {
                 Ok(Some(line)) => {
                     match parse_generalized_line(&spec, &line) {
-                        Ok(_) => {}, // Ignore for now
+                        Ok(_) => {} // Ignore for now
                         Err(e) => errors.push((line_count + 1, e.into_owned())),
                     }
-                },
+                }
                 Ok(None) => break,
                 Err(e) => return format!("Error reading line {}! {:?}", line_count + 1, e),
             }
@@ -297,10 +308,11 @@ async fn run_gcode_file(
             return format!(
                 "Encountered errors in file \"{}\"!\n{}",
                 message.path,
-                errors.into_iter().map(|(line_num, error)|
-                    format!("Line {}: {}\n", line_num, error.description)
-                ).format("")
-            )
+                errors
+                    .into_iter()
+                    .map(|(line_num, error)| format!("Line {}: {}\n", line_num, error.description))
+                    .format("")
+            );
         }
     }
     let result = broker.try_send_job(
@@ -308,11 +320,11 @@ async fn run_gcode_file(
             stream! {
                 let file = match File::open(format!("gcode/{}", message.path)).await {
                     Ok(file) => file,
-                    Err(e) => {
+                    Err(_e) => {
                         yield GeneralizedLineOwned::Comment("couldn't open file!".to_string());
                         return
                     },
-                };            
+                };
                 let file = BufReader::new(file);
                 let mut lines = file.lines();
                 loop {
@@ -320,12 +332,12 @@ async fn run_gcode_file(
                         Ok(Some(line)) => {
                             match parse_generalized_line(&spec, &line) {
                                 Ok(line) => yield line.into_owned(), // Ignore for now
-                                Err(e) => return,
+                                Err(_e) => return,
                             }
                         },
                         Ok(None) => return,
-                        Err(e) => return,
-                    }            
+                        Err(_e) => return,
+                    }
                 }
             },
             line_count,
@@ -340,7 +352,6 @@ async fn run_gcode_file(
         Err(_) => "Job not sent!".to_string(),
     }
 }
-
 
 async fn listen_status(ws: WebSocketUpgrade, broker: Extension<Arc<Broker>>) -> Response {
     let mut debug_receiver = broker.watch_status();

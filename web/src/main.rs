@@ -2,6 +2,8 @@ mod utils;
 mod mdc;
 mod debug_page;
 mod status_header;
+mod gcode_job_page;
+
 use sycamore::prelude::*;
 
 use reqwasm::websocket::{futures::WebSocket, Message};
@@ -16,6 +18,7 @@ use std::rc::Rc;
 use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
 use mdc::CircularProgress;
+use gcode_job_page::GCodePage;
 use status_header::StatusHeader;
 
 use std::time::Duration;
@@ -213,8 +216,10 @@ fn swoop_signal<'a>(cx: Scope<'a>) -> &'a ReadSignal<f32> {
 enum AppRoutes {
     #[to("/")]
     Index,
-    #[to("/page_1")]
-    Page1,
+    #[to("/debug")]
+    Debug,
+    #[to("/send_gcode")]
+    SendGcode,
     #[not_found]
     NotFound,
 }
@@ -225,9 +230,13 @@ fn IndexPage(cx: Scope) -> View<DomNode> {
         div {
             "Hello! "
             //DebugLine(text="hello!".to_string())
-            a(href="/page_1") {
-                "Go to page 1?"
+            a(href="/debug") {
+                "Debug page"
             }       
+            br {}
+            a(href="/send_gcode") {
+                "Send gcode"
+            }      
         }
     }
 }
@@ -269,8 +278,11 @@ fn main() {
                                 AppRoutes::Index => view! { cx,
                                     IndexPage
                                 },
-                                AppRoutes::Page1 => view! { cx,
+                                AppRoutes::Debug => view! { cx,
                                     DebugPage
+                                },
+                                AppRoutes::SendGcode => view! { cx,
+                                    GCodePage
                                 },
                                 AppRoutes::NotFound => view! { cx,
                                     NotFound

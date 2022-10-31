@@ -130,7 +130,8 @@ async fn main() {
         // allow `GET` and `POST` when accessing the resource
         .allow_methods(Any)
         // allow requests from any origin... should maybe read in config
-        .allow_origin(Any);
+        .allow_origin(Any)
+        .allow_headers(Any);
     // We should probably add some other authentication?
     // Maybe a header-to-cookie sort of deal?
     // Or double submit cookie?

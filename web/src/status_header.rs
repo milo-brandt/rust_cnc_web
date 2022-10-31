@@ -17,8 +17,8 @@ use std::time::Duration;
 use crate::utils::async_sycamore;
 
 pub struct GlobalInfo<'a> {
-    status: &'a ReadSignal<String>,
-    is_idle: &'a ReadSignal<bool>
+    pub status: &'a ReadSignal<String>,
+    pub is_idle: &'a ReadSignal<bool>
 }
 
 pub fn global_info<'a>(cx: Scope<'a>) -> &'a GlobalInfo<'a> {

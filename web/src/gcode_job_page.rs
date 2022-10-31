@@ -16,6 +16,7 @@ use web_sys::{KeyboardEvent, Event};
 use gloo_timers::future::sleep;
 use std::time::Duration;
 use sycamore::futures::create_resource;
+use crate::status_header::GlobalInfo;
 use crate::utils::async_sycamore;
 
 
@@ -58,14 +59,14 @@ pub fn GCodePage(cx: Scope) -> View<DomNode> {
         let names: Vec<String> = result.json().await.unwrap();
         names
     });
-    let enabled = create_signal(cx, true);
+    let global_info: &GlobalInfo = use_context(cx);
     let list = create_memo(cx, move || (*list.get()).clone().unwrap_or(Vec::new()));
     view! { cx,
         div(class="debug_page") {
             Indexed(
                 iterable=list,
                 view=move |cx, x| view! { cx,
-                    GcodeFile(name=x, can_send_job=enabled)
+                    GcodeFile(name=x, can_send_job=global_info.is_idle)
                 }
             )
         }

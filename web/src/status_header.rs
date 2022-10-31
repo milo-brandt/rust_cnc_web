@@ -16,18 +16,12 @@ use gloo_timers::future::sleep;
 use std::time::Duration;
 use crate::utils::async_sycamore;
 
-#[component]
-pub fn StatusHeader(cx: Scope) -> View<DomNode> {
-    let css_style = style! { r#"
-        display: flex;
-        flex-direction: column;
-        height: 5vh;
-        width: 100vw;
-        align-items: stretch;
-        background-color: gray;
-    "#
-    }.expect("CSS should work");
-    log::debug!("CSS class: {}", css_style.get_class_name());
+pub struct GlobalInfo<'a> {
+    status: &'a ReadSignal<String>,
+    is_idle: &'a ReadSignal<bool>
+}
+
+pub fn global_info<'a>(cx: Scope<'a>) -> &'a GlobalInfo<'a> {
     let (mut message_list_sender, message_list) = async_sycamore::create_channel(cx, "Waiting for connection...".to_string());
     {
         async_sycamore::spawn_local_drop_with_context(cx, async move {
@@ -59,9 +53,29 @@ pub fn StatusHeader(cx: Scope) -> View<DomNode> {
             //log::debug!("Oooh, bye!");
         });
     }
+    create_ref(cx, GlobalInfo {
+        status: message_list,
+        is_idle: create_memo(cx, move || *message_list.get() == "Idle")
+    })
+}
+
+
+#[component]
+pub fn StatusHeader(cx: Scope) -> View<DomNode> {
+    let css_style = style! { r#"
+        display: flex;
+        flex-direction: column;
+        height: 5vh;
+        width: 100vw;
+        align-items: stretch;
+        background-color: gray;
+    "#
+    }.expect("CSS should work");
+    log::debug!("CSS class: {}", css_style.get_class_name());
+    let global_info: &GlobalInfo = use_context(cx);
     view! { cx,
         div(class=css_style.get_class_name()) {
-            (message_list.get())
+            (global_info.status.get())
         }
     }
 }

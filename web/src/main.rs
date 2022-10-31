@@ -4,6 +4,8 @@ mod debug_page;
 mod status_header;
 mod gcode_job_page;
 
+use status_header::GlobalInfo;
+use status_header::global_info;
 use sycamore::prelude::*;
 
 use reqwasm::websocket::{futures::WebSocket, Message};
@@ -14,6 +16,7 @@ use futures::channel::oneshot;
 use futures::channel::mpsc;
 use futures::select;
 use std::cell::RefCell;
+use std::mem;
 use std::rc::Rc;
 use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
@@ -267,6 +270,7 @@ fn main() {
     console_error_panic_hook::set_once();
     wasm_logger::init(wasm_logger::Config::default());
     sycamore::render(|cx| {
+        provide_context_ref(cx,  unsafe { mem::transmute::<_, &GlobalInfo<'static>>(global_info(cx)) });
         view! { cx,
             StatusHeader
             Router(

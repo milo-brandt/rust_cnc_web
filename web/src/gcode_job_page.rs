@@ -20,12 +20,13 @@ use crate::utils::async_sycamore;
 
 
 #[derive(Prop)]
-pub struct GcodeFileProps {
+pub struct GcodeFileProps<'a> {
     name: String,
+    can_send_job: &'a ReadSignal<bool>
 }
 
 #[component]
-pub fn GcodeFile(cx: Scope, props: GcodeFileProps) -> View<DomNode> {
+pub fn GcodeFile<'a>(cx: Scope<'a>, props: GcodeFileProps<'a>) -> View<DomNode> {
     let name = create_ref(cx, props.name);
     let run_callback = create_ref(cx, |_| {
         let name = name.clone();
@@ -42,7 +43,7 @@ pub fn GcodeFile(cx: Scope, props: GcodeFileProps) -> View<DomNode> {
     view! { cx,
         div(class="gcode_line") {
             (name.clone()) " "
-            button(on:click=run_callback) { "Run!" }
+            button(on:click=run_callback, disabled=!*props.can_send_job.get()) { "Run!" }
         }
     }
 }
@@ -57,13 +58,14 @@ pub fn GCodePage(cx: Scope) -> View<DomNode> {
         let names: Vec<String> = result.json().await.unwrap();
         names
     });
+    let enabled = create_signal(cx, true);
     let list = create_memo(cx, move || (*list.get()).clone().unwrap_or(Vec::new()));
     view! { cx,
         div(class="debug_page") {
             Indexed(
                 iterable=list,
-                view=|cx, x| view! { cx,
-                    GcodeFile(name=x)
+                view=move |cx, x| view! { cx,
+                    GcodeFile(name=x, can_send_job=enabled)
                 }
             )
         }

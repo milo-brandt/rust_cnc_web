@@ -3,7 +3,9 @@ mod mdc;
 mod debug_page;
 mod status_header;
 mod gcode_job_page;
+mod jog_page;
 
+use jog_page::JogPage;
 use status_header::GlobalInfo;
 use status_header::global_info;
 use sycamore::prelude::*;
@@ -223,6 +225,8 @@ enum AppRoutes {
     Debug,
     #[to("/send_gcode")]
     SendGcode,
+    #[to("/jog")]
+    Jog,
     #[not_found]
     NotFound,
 }
@@ -239,6 +243,10 @@ fn IndexPage(cx: Scope) -> View<DomNode> {
             br {}
             a(href="/send_gcode") {
                 "Send gcode"
+            }      
+            br {}
+            a(href="/jog") {
+                "Jog"
             }      
         }
     }
@@ -287,6 +295,9 @@ fn main() {
                                 },
                                 AppRoutes::SendGcode => view! { cx,
                                     GCodePage
+                                },
+                                AppRoutes::Jog => view! { cx,
+                                    JogPage
                                 },
                                 AppRoutes::NotFound => view! { cx,
                                     NotFound

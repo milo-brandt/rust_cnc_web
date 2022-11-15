@@ -1,15 +1,16 @@
 #![allow(dead_code)]
 
-use std::{sync::Mutex, convert::Infallible};
+use std::{sync::Mutex, convert::Infallible, thread};
 
 use axum::{response::{sse::Event, Sse}, extract::{multipart::Field, ContentLengthLimit}};
 use cnc::grbl::messages::{GrblStateInfo};
 use futures::{Stream, Future, pin_mut};
+use hyper::server;
 use tokio::{sync::{mpsc, broadcast, watch}, spawn, time::MissedTickBehavior, io::AsyncWriteExt, fs::read_dir};
-
+use chrono::offset::Local;
 mod cnc;
 mod util;
-
+use tokio::runtime::{Runtime, Builder};
 use {
     async_stream::stream,
     axum::{
@@ -122,25 +123,26 @@ async fn status_stream_task(machine: Arc<MachineInterface>) -> StatusStreamInfo 
     }
 }
 
+async fn setup_machine() -> (MachineInterface, impl Future<Output = ()>) {
+    println!("Opening machine!");
+    let (reader, writer) =
+        cnc::connection::open_and_reset_arduino_like_serial("/dev/ttyUSB0").await;
+    println!("Waiting for greeting!");
+    start_machine(reader, writer).await.unwrap()
+}
 
-
-#[tokio::main]
-async fn main() {
+async fn run_server(machine: MachineInterface) {
     let cors = CorsLayer::new()
-        // allow `GET` and `POST` when accessing the resource
-        .allow_methods(Any)
-        // allow requests from any origin... should maybe read in config
-        .allow_origin(Any)
-        .allow_headers(Any);
+    // allow `GET` and `POST` when accessing the resource
+    .allow_methods(Any)
+    // allow requests from any origin... should maybe read in config
+    .allow_origin(Any)
+    .allow_headers(Any);
     // We should probably add some other authentication?
     // Maybe a header-to-cookie sort of deal?
     // Or double submit cookie?
-    let (reader, writer) =
-        cnc::connection::open_and_reset_arduino_like_serial("/dev/ttyUSB0").await;
-    let machine = start_machine(reader, writer).await.unwrap();
-    let machine_arc = Arc::new(machine);
-    
-    // build our application with a single route
+
+    let machine_arc= Arc::new(machine);
     let app = Router::new()
         .route("/job/run_file", post(run_gcode_file))
         .route("/debug/send", post(index))
@@ -164,6 +166,27 @@ async fn main() {
         .await
         .unwrap();
 }
+
+fn main() {
+    let server_runtime = Builder::new_multi_thread().worker_threads(3).enable_all().build().unwrap();
+    let (machine, machine_future) = server_runtime.block_on(setup_machine());
+    println!("Spawning runtimes!");
+    thread::spawn(move || { // put the machine on a dedicated thread that loves to look at IO
+        let machine_runtime = Builder::new_current_thread().enable_all().event_interval(1).build().unwrap();
+        machine_runtime.block_on(machine_future);
+    });
+    server_runtime.block_on(run_server(machine));
+}
+
+/*
+#[tokio::main]
+async fn main() {
+    spawn(machine_future);
+
+    // build our application with a single route
+
+}
+*/
 
 async fn listen_machine_status(status_stream: Extension<Arc<StatusStreamInfo>>) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     println!("Request to listen to status!");

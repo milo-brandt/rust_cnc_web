@@ -95,14 +95,14 @@ where
                                 next_stream_future = stream.next();
                                 match v {
                                     GeneralizedLineOwned::Line(line) => {
-                                        let (sender, receiver) = oneshot::channel();
+                                        let (sender, _receiver) = oneshot::channel();
                                         let data = format!("{}\n", spec.format_line(&line)).into_bytes();
                                         handle.write_stream.send(WriteRequest::Plain { data , result: sender }).await.unwrap();
                                         job_handle.return_stream.send(MessageFromJob::Status(format!("At line {}/{}", line_num, total_lines))).await.unwrap();
-                                        if let Err(e) = receiver.await.unwrap() {
+                                        /* if let Err(e) = receiver.await.unwrap() {
                                             handle.write_stream.send(WriteRequest::Comment(format!("Error in job! Line: {}\n{:?}\n", line_num + 1, e))).await.unwrap();
                                             break;
-                                        }
+                                        } */ //don't wait for ok
                                     },
                                     GeneralizedLineOwned::Comment(comment) => handle.write_stream.send(WriteRequest::Comment(comment.to_string())).await.unwrap(),
                                     GeneralizedLineOwned::Empty => {},

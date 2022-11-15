@@ -1,3 +1,7 @@
+use std::str::from_utf8_unchecked;
+
+use futures::Future;
+
 use {
     super::{
         messages::{GrblMessage, GrblPosition, GrblStateInfo, ProbeEvent},
@@ -53,6 +57,7 @@ pub struct MachineThreadInput {
 
 struct MachineThread<Write: AsyncWrite + Unpin> {
     write: Write,
+    ready_for_gcode: bool,
     debug_stream: history_broadcast::Sender<MachineDebugEvent>,
     waiting_ok: VecDeque<oneshot::Sender<Result<(), u64>>>,
     waiting_probe: VecDeque<oneshot::Sender<Result<ProbeEvent, u64>>>,
@@ -112,6 +117,7 @@ impl<Write: AsyncWrite + Unpin> MachineThread<Write> {
                 self.status_refresh = Box::pin(Fuse::terminated());
             }
             GrblMessage::GrblError(index) => {
+                self.ready_for_gcode = true;
                 let next_result = self.waiting_ok.pop_front();
                 match next_result {
                     Some(channel) => drop(channel.send(Err(index))),
@@ -124,6 +130,7 @@ impl<Write: AsyncWrite + Unpin> MachineThread<Write> {
                 format!("received unexpected alarm {}!", index),
             )),
             GrblMessage::GrblOk => {
+                self.ready_for_gcode = true;
                 let next_result = self.waiting_ok.pop_front();
                 match next_result {
                     Some(channel) => drop(channel.send(Ok(()))),
@@ -141,6 +148,7 @@ impl<Write: AsyncWrite + Unpin> MachineThread<Write> {
     async fn plain_send(&mut self, request: WriteRequest) {
         match request {
             WriteRequest::Plain { data, result } => {
+                self.ready_for_gcode = false;
                 self.write_bytes(data).await.unwrap();
                 self.waiting_ok.push_back(result);
             }
@@ -149,6 +157,7 @@ impl<Write: AsyncWrite + Unpin> MachineThread<Write> {
                 result_ok,
                 result,
             } => {
+                self.ready_for_gcode = false;
                 self.write_bytes(data).await.unwrap();
                 self.waiting_ok.push_back(result_ok);
                 self.waiting_probe.push_back(result);
@@ -185,13 +194,13 @@ pub async fn start_machine<
 >(
     reader: Read,
     mut writer: Write,
-) -> Option<MachineInterface> {
+) -> Option<(MachineInterface, impl Future<Output=()>)> {
     let mut lines_reader = BufReader::new(reader).lines();
     // First: loop until we get a greeting.
     println!("Waiting for greeting...");
     let mut debug_stream = history_broadcast::Sender::new(512);
-    let (write_stream_send, mut write_stream_receive) = mpsc::channel(512);
-    let (immediate_write_stream_send, mut immediate_write_stream_receive) = mpsc::channel(512);
+    let (write_stream_send, mut write_stream_receive) = mpsc::channel(32);
+    let (immediate_write_stream_send, mut immediate_write_stream_receive) = mpsc::channel(32);
     let debug_stream_receiver = debug_stream.subscribe_with_history_count(0);
     loop {
         match lines_reader.next_line().await {
@@ -224,10 +233,10 @@ pub async fn start_machine<
         }
     };
     println!("Status received... spawning machine thread");
-    // Potentially better to return the future - let someone else poll it or spawn it as they please.
-    spawn(async move {
+    let machine_future = async move {
         let mut machine_thread = MachineThread {
             write: writer,
+            ready_for_gcode: true,
             debug_stream,
             waiting_ok: Default::default(),
             waiting_probe: Default::default(),
@@ -243,7 +252,7 @@ pub async fn start_machine<
                         machine_thread.receive_line(line).await
                     }
                 },
-                write_request = write_stream_receive.recv() => {
+                write_request = write_stream_receive.recv(), if machine_thread.ready_for_gcode => {
                     if let Some(request) = write_request {
                         machine_thread.plain_send(request).await
                     }
@@ -258,10 +267,10 @@ pub async fn start_machine<
                 }
             }
         }
-    });
-    Some(MachineInterface {
+    };
+    Some((MachineInterface {
         debug_stream: debug_stream_receiver,
         write_stream: write_stream_send,
         immediate_write_stream: immediate_write_stream_send,
-    })
+    }, machine_future))
 }

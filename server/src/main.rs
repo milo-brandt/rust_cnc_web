@@ -10,6 +10,8 @@ use tokio::{sync::{mpsc, broadcast, watch}, spawn, time::MissedTickBehavior, io:
 use chrono::offset::Local;
 mod cnc;
 mod util;
+mod oneway_websocket;
+use oneway_websocket::send_stream;
 use tokio::runtime::{Runtime, Builder};
 use {
     async_stream::stream,
@@ -151,7 +153,6 @@ async fn run_server(machine: MachineInterface) {
         .route("/debug/listen_raw", get(listen_raw))
         .route("/debug/listen_status", get(listen_status))
         .route("/debug/listen_position", get(listen_position))
-        .route("/debug/listen_machine_status", get(listen_machine_status))
         .route("/upload", post(upload))
         .route("/list_files", get(get_gcode_list))
         //.route("/ws", get(websocket_upgrade))
@@ -189,108 +190,31 @@ async fn main() {
 }
 */
 
-async fn listen_machine_status(status_stream: Extension<Arc<StatusStreamInfo>>) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    println!("Request to listen to status!");
-    let mut receiver = status_stream.subscribe().await;
-    let result = stream! {
-        loop {
-            let data = format!("[{}]", receiver.borrow().machine_position.indexed_iter().map(|(_, v)| v).format(", "));
-            yield Event::default().data(data);
-            if let Err(_) = receiver.changed().await {
-                break
-            }
-        }
-    }.map(Ok);
-    Sse::new(result)
-}
-
 async fn listen_position(ws: WebSocketUpgrade, status_stream: Extension<Arc<StatusStreamInfo>>) -> Response {
     println!("Request to listen to status!");
     let mut receiver = status_stream.subscribe().await;
-    ws.on_upgrade(move |socket| async move {
-        let (mut writer, mut reader) = socket.split();
-        let (closer, mut close_listen) = oneshot::channel::<()>();
-        let (writer, reader) = join! {
-            async move {
-                loop {
-                    let data = format!("[{}]", receiver.borrow().machine_position.indexed_iter().map(|(_, v)| v).format(", "));
-                    if writer.send(Message::Text(data)).await.is_err() {
-                        break;
-                    }        
-                    select! {
-                        event = receiver.changed() => {
-                            if event.is_err() {
-                                break
-                            }
-                        }
-                        _ = &mut close_listen => break
-                    }
-                }
-                writer
-            },
-            async move {
-                //ensure that this is actually getting read - so we can handle close frame!
-                loop {
-                    let response = <SplitStream<WebSocket> as StreamExt>::next(&mut reader).await;
-                    if let Some(Ok(Message::Close(_))) = response {
-                        closer.send(()).unwrap();
-                        break
-                    }
-                    if response.is_none() {
-                        break
-                    }
-                }
-                reader
-            }
-        };
-        let together = reader.reunite(writer).unwrap();
-        drop(together.close().await);
+    send_stream(ws, stream! {
+        loop {
+            let data = format!("[{}]", receiver.borrow().machine_position.indexed_iter().map(|(_, v)| v).format(", "));
+            yield Message::Text(data);
+            drop(receiver.changed().await);
+        }
     })
 }
 
 async fn listen_raw(ws: WebSocketUpgrade, machine: Extension<Arc<MachineInterface>>) -> Response {
     let mut debug_receiver = machine.debug_stream.subscribe_with_history_count(100);
-    ws.on_upgrade(move |socket| async move {
-        let (mut writer, mut reader) = socket.split();
-        let (closer, mut close_listen) = oneshot::channel::<()>();
-        let (writer, reader) = join! {
-            async move {
-                loop {
-                    select! {
-                        event = debug_receiver.recv() => {
-                            let event = event.unwrap();
-                            let message = match event {
-                                MachineDebugEvent::Sent(str) => format!("> {}", unsafe { from_utf8_unchecked(&str) }),
-                                MachineDebugEvent::Received(str) => format!("< {}", str),
-                                MachineDebugEvent::Warning(str) => format!("! {}", str),
-                                MachineDebugEvent::Comment(str) => format!("~ {}", str),
-                            };
-                            if writer.send(Message::Text(message)).await.is_err() {
-                                break
-                            }
-                        }
-                        _ = &mut close_listen => break
-                    }
-                }
-                writer
-            },
-            async move {
-                //ensure that this is actually getting read - so we can handle close frame!
-                loop {
-                    let response = <SplitStream<WebSocket> as StreamExt>::next(&mut reader).await;
-                    if let Some(Ok(Message::Close(_))) = response {
-                        closer.send(()).unwrap();
-                        break
-                    }
-                    if response.is_none() {
-                        break
-                    }
-                }
-                reader
-            }
-        };
-        let together = reader.reunite(writer).unwrap();
-        drop(together.close().await);
+    send_stream(ws, stream! { 
+        loop {
+            let event = debug_receiver.recv().await.unwrap();
+            let message = match event {
+                MachineDebugEvent::Sent(str) => format!("> {}", unsafe { from_utf8_unchecked(&str) }),
+                MachineDebugEvent::Received(str) => format!("< {}", str),
+                MachineDebugEvent::Warning(str) => format!("! {}", str),
+                MachineDebugEvent::Comment(str) => format!("~ {}", str),
+            };
+            yield Message::Text(message);
+        }
     })
 }
 
@@ -509,47 +433,16 @@ async fn run_gcode_file(
 
 async fn listen_status(ws: WebSocketUpgrade, broker: Extension<Arc<Broker>>) -> Response {
     let mut debug_receiver = broker.watch_status();
-    ws.on_upgrade(move |socket| async move {
-        let (mut writer, mut reader) = socket.split();
-        let (closer, mut close_listen) = oneshot::channel::<()>();
-        let (writer, reader) = join! {
-            async move {
-                // Make sure we send a first message
-                let status = debug_receiver.borrow().clone();
-                if writer.send(Message::Text(status)).await.is_err() {
-                    return writer
-                }
-                loop {
-                    select! {
-                        _event = debug_receiver.changed() => {
-                            let status = debug_receiver.borrow().clone();
-                            if writer.send(Message::Text(status)).await.is_err() {
-                                break
-                            }
-                            sleep(Duration::from_millis(100)).await; //Limit events to once per 100 ms. A little hacky - won't hear close_listen till later.
-                        }
-                        _ = &mut close_listen => break
-                    }
-                }
-                writer
-            },
-            async move {
-                //ensure that this is actually getting read - so we can handle close frame!
-                loop {
-                    let response = <SplitStream<WebSocket> as StreamExt>::next(&mut reader).await;
-                    if let Some(Ok(Message::Close(_))) = response {
-                        closer.send(()).unwrap();
-                        break
-                    }
-                    if response.is_none() {
-                        break
-                    }
-                }
-                reader
-            }
-        };
-        let together = reader.reunite(writer).unwrap();
-        drop(together.close().await);
+    send_stream(ws, stream! {
+        // Make sure we send a first message
+        let status = debug_receiver.borrow().clone();
+        yield Message::Text(status);
+        loop {
+            debug_receiver.changed().await;
+            let status = debug_receiver.borrow().clone();
+            yield Message::Text(status);
+            sleep(Duration::from_millis(100)).await; //Limit events to once per 100 ms. A little hacky - won't hear close_listen till later.
+        }
     })
 }
 

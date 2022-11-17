@@ -14,7 +14,7 @@ use stylist::style;
 use web_sys::{KeyboardEvent, Event};
 use gloo_timers::future::sleep;
 use std::time::Duration;
-use crate::utils::async_sycamore;
+use sycamore::futures::spawn_local_scoped;
 
 pub struct GlobalInfo<'a> {
     pub status: &'a ReadSignal<String>,
@@ -22,11 +22,14 @@ pub struct GlobalInfo<'a> {
 }
 
 pub fn global_info<'a>(cx: Scope<'a>) -> &'a GlobalInfo<'a> {
-    let (mut message_list_sender, message_list) = async_sycamore::create_channel(cx, "Waiting for connection...".to_string());
+    let message_list = create_signal(cx, "Waiting for connection...".to_string());
+    let position = create_signal(cx, "".to_string());
     {
-        async_sycamore::spawn_local_drop_with_context(cx, async move {
+        spawn_local_scoped(cx, async move {
             let mut ws = WebSocket::open("ws://cnc:3000/debug/listen_status").unwrap();
+            let mut ws2 = WebSocket::open("ws://cnc:3000/debug/listen_position").unwrap();
             let mut ws_next = ws.next().fuse();
+            let mut ws2_next = ws2.next().fuse();
             loop {
                 select! {
                     next_message = &mut ws_next => {
@@ -34,10 +37,23 @@ pub fn global_info<'a>(cx: Scope<'a>) -> &'a GlobalInfo<'a> {
                         match next_message {
                             Some(Ok(Message::Text(ws_message))) => {
                                 log::debug!("Received status: {:?}", ws_message);
-                                message_list_sender.set(ws_message);
+                                message_list.set(ws_message);
                             }
                             Some(_) => {
                                 log::debug!("Received status: ???");
+                            }
+                            None => break
+                        }
+                    },
+                    next_message = &mut ws2_next => {
+                        ws2_next = ws2.next().fuse();
+                        match next_message {
+                            Some(Ok(Message::Text(ws_message))) => {
+                                log::debug!("Received position status: {:?}", ws_message);
+                                position.set(ws_message);
+                            }
+                            Some(_) => {
+                                log::debug!("Received position status: ???");
                             }
                             None => break
                         }
@@ -54,7 +70,7 @@ pub fn global_info<'a>(cx: Scope<'a>) -> &'a GlobalInfo<'a> {
         });
     }
     create_ref(cx, GlobalInfo {
-        status: message_list,
+        status: create_memo(cx, || format!("{}\n{}", *message_list.get(), *position.get())),
         is_idle: create_memo(cx, move || *message_list.get() == "Idle")
     })
 }

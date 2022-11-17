@@ -150,6 +150,7 @@ async fn run_server(machine: MachineInterface) {
         .route("/debug/gcode_unchecked_if_free", post(run_gcode_unchecked))
         .route("/debug/listen_raw", get(listen_raw))
         .route("/debug/listen_status", get(listen_status))
+        .route("/debug/listen_position", get(listen_position))
         .route("/debug/listen_machine_status", get(listen_machine_status))
         .route("/upload", post(upload))
         .route("/list_files", get(get_gcode_list))
@@ -201,6 +202,50 @@ async fn listen_machine_status(status_stream: Extension<Arc<StatusStreamInfo>>) 
         }
     }.map(Ok);
     Sse::new(result)
+}
+
+async fn listen_position(ws: WebSocketUpgrade, status_stream: Extension<Arc<StatusStreamInfo>>) -> Response {
+    println!("Request to listen to status!");
+    let mut receiver = status_stream.subscribe().await;
+    ws.on_upgrade(move |socket| async move {
+        let (mut writer, mut reader) = socket.split();
+        let (closer, mut close_listen) = oneshot::channel::<()>();
+        let (writer, reader) = join! {
+            async move {
+                loop {
+                    let data = format!("[{}]", receiver.borrow().machine_position.indexed_iter().map(|(_, v)| v).format(", "));
+                    if writer.send(Message::Text(data)).await.is_err() {
+                        break;
+                    }        
+                    select! {
+                        event = receiver.changed() => {
+                            if event.is_err() {
+                                break
+                            }
+                        }
+                        _ = &mut close_listen => break
+                    }
+                }
+                writer
+            },
+            async move {
+                //ensure that this is actually getting read - so we can handle close frame!
+                loop {
+                    let response = <SplitStream<WebSocket> as StreamExt>::next(&mut reader).await;
+                    if let Some(Ok(Message::Close(_))) = response {
+                        closer.send(()).unwrap();
+                        break
+                    }
+                    if response.is_none() {
+                        break
+                    }
+                }
+                reader
+            }
+        };
+        let together = reader.reunite(writer).unwrap();
+        drop(together.close().await);
+    })
 }
 
 async fn listen_raw(ws: WebSocketUpgrade, machine: Extension<Arc<MachineInterface>>) -> Response {

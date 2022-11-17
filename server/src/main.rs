@@ -153,7 +153,7 @@ async fn run_server(machine: MachineInterface) {
         .route("/debug/listen_raw", get(listen_raw))
         .route("/debug/listen_status", get(listen_status))
         .route("/debug/listen_position", get(listen_position))
-        .route("/upload", post(upload))
+        .route("/job/upload_file", post(upload))
         .route("/list_files", get(get_gcode_list))
         //.route("/ws", get(websocket_upgrade))
         .layer(cors)
@@ -438,7 +438,7 @@ async fn listen_status(ws: WebSocketUpgrade, broker: Extension<Arc<Broker>>) -> 
         let status = debug_receiver.borrow().clone();
         yield Message::Text(status);
         loop {
-            debug_receiver.changed().await;
+            drop(debug_receiver.changed().await);
             let status = debug_receiver.borrow().clone();
             yield Message::Text(status);
             sleep(Duration::from_millis(100)).await; //Limit events to once per 100 ms. A little hacky - won't hear close_listen till later.

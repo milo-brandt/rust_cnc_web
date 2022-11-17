@@ -60,16 +60,26 @@ pub fn GCodePage(cx: Scope) -> View<DomNode> {
         names
     });
     let global_info: &GlobalInfo = use_context(cx);
-    let list = create_memo(cx, move || (*list.get()).clone().unwrap_or(Vec::new()));
+    //let list = create_memo(cx, move || (*list.get()).clone().unwrap_or(Vec::new()));
     view! { cx,
-        div(class="debug_page") {
-            Indexed(
-                iterable=list,
-                view=move |cx, x| view! { cx,
-                    GcodeFile(name=x, can_send_job=global_info.is_idle)
+        (if list.get().is_none() {
+            view! { cx, 
+                "Loading..."
+            }
+        } else {
+            let list = list.clone();
+            let list = create_memo(cx, move || (*list.get()).clone().unwrap_or(Vec::new()));
+            view! { cx, 
+                div(class="debug_page") {
+                    Indexed(
+                        iterable=list,
+                        view=move |cx, x| view! { cx,
+                            GcodeFile(name=x, can_send_job=global_info.is_idle)
+                        }
+                    )
                 }
-            )
-        }
+            }
+        })
         a(href="/") { "Go home!" }
     }
 }

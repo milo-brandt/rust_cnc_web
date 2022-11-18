@@ -6,7 +6,7 @@ use axum::{response::{sse::Event, Sse}, extract::{multipart::Field, ContentLengt
 use cnc::grbl::messages::{GrblStateInfo};
 use futures::{Stream, Future, pin_mut};
 use hyper::server;
-use tokio::{sync::{mpsc, broadcast, watch}, spawn, time::MissedTickBehavior, io::AsyncWriteExt, fs::read_dir};
+use tokio::{sync::{mpsc, broadcast, watch}, spawn, time::MissedTickBehavior, io::AsyncWriteExt, fs::{read_dir, remove_file}};
 use chrono::offset::Local;
 mod cnc;
 mod util;
@@ -21,7 +21,7 @@ use {
             Json, RawBody, Multipart
         },
         response::Response,
-        routing::{get, post},
+        routing::{get, post, delete},
         Extension, Router,
     },
     cnc::{
@@ -154,6 +154,7 @@ async fn run_server(machine: MachineInterface) {
         .route("/debug/listen_status", get(listen_status))
         .route("/debug/listen_position", get(listen_position))
         .route("/job/upload_file", post(upload))
+        .route("/job/delete_file", delete(delete_file))
         .route("/list_files", get(get_gcode_list))
         //.route("/ws", get(websocket_upgrade))
         .layer(cors)
@@ -482,6 +483,16 @@ async fn upload(multipart: ContentLengthLimit<Multipart, 134217728>) -> String {
         }
     }
     "File not given!".to_string()
+}
+#[derive(Deserialize)]
+struct DeleteGcodeFile {
+    path: String,
+}
+
+async fn delete_file(info: Json<DeleteGcodeFile>) -> String {
+    //TODO: Scope where we can delete :)
+    remove_file(format!("gcode/{}", info.path)).await.unwrap();
+    "Ok".to_string()
 }
 
 async fn get_gcode_list() -> Json<Vec<String>> {

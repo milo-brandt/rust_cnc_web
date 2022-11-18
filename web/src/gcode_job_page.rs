@@ -22,13 +22,14 @@ use crate::utils::async_sycamore;
 
 
 #[derive(Prop)]
-pub struct GcodeFileProps<'a> {
+pub struct GcodeFileProps<'a, F: Fn() -> ()> {
     name: String,
-    can_send_job: &'a ReadSignal<bool>
+    can_send_job: &'a ReadSignal<bool>,
+    on_delete: F,
 }
 
 #[component]
-pub fn GcodeFile<'a>(cx: Scope<'a>, props: GcodeFileProps<'a>) -> View<DomNode> {
+pub fn GcodeFile<'a, F: Fn() -> () + 'a>(cx: Scope<'a>, props: GcodeFileProps<'a, F>) -> View<DomNode> {
     let name = create_ref(cx, props.name);
     let run_callback = create_ref(cx, |_| {
         let name = name.clone();
@@ -42,10 +43,25 @@ pub fn GcodeFile<'a>(cx: Scope<'a>, props: GcodeFileProps<'a>) -> View<DomNode> 
             log::debug!("Result: {:?}", result);
         });
     });
+    let on_delete = create_ref(cx, props.on_delete);
+    let delete_callback = create_ref(cx, move |_| {
+        let name = name.clone();
+        spawn_local_scoped(cx, async move {
+            log::debug!("Deleting job!");
+            let result = Request::delete("http://cnc:3000/job/delete_file")
+            .body(format!("{{\"path\":\"{}\"}}", name))
+            .header("Content-Type", "application/json")
+            .send()
+            .await;
+            log::debug!("Result: {:?}", result);
+            on_delete();
+        });
+    });
     view! { cx,
         div(class="gcode_line") {
             (name.clone()) " "
             button(on:click=run_callback, disabled=!*props.can_send_job.get()) { "Run!" }
+            button(on:click=delete_callback, disabled=!*props.can_send_job.get()) { "Delete!" }
         }
     }
 }
@@ -121,7 +137,7 @@ pub fn GCodePage(cx: Scope) -> View<DomNode> {
                     Indexed(
                         iterable=list,
                         view=move |cx, x| view! { cx,
-                            GcodeFile(name=x, can_send_job=global_info.is_idle)
+                            GcodeFile(name=x, can_send_job=global_info.is_idle, on_delete=move || spawn_local_scoped(cx, get_list()))
                         }
                     )
                 }

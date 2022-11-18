@@ -50,6 +50,8 @@ pub fn global_info<'a>(cx: Scope<'a>) -> &'a GlobalInfo<'a> {
                         match next_message {
                             Some(Ok(Message::Text(ws_message))) => {
                                 log::debug!("Received position status: {:?}", ws_message);
+                                let value: common::MachineStatus = serde_json::from_str(&ws_message).unwrap();
+                                log::debug!("Value: {:?}", value);
                                 position.set(ws_message);
                             }
                             Some(_) => {

@@ -37,6 +37,7 @@ pub struct GrblStatus {
 }
 #[derive(Debug, Clone, PartialEq)]
 pub struct GrblStateInfo {
+    pub state: GrblState,
     pub machine_position: Array1<f64>,
     pub work_coordinate_offset: Array1<f64>,
 }

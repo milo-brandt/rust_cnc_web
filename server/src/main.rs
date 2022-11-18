@@ -6,6 +6,7 @@ use axum::{response::{sse::Event, Sse}, extract::{multipart::Field, ContentLengt
 use cnc::grbl::messages::{GrblStateInfo};
 use futures::{Stream, Future, pin_mut};
 use hyper::server;
+use serde::Serialize;
 use tokio::{sync::{mpsc, broadcast, watch}, spawn, time::MissedTickBehavior, io::AsyncWriteExt, fs::{read_dir, remove_file}};
 use chrono::offset::Local;
 mod cnc;
@@ -191,12 +192,20 @@ async fn main() {
 }
 */
 
+
+//TODO: Put this somewhere it can be serialized and deserialized in common between front and back ends!
 async fn listen_position(ws: WebSocketUpgrade, status_stream: Extension<Arc<StatusStreamInfo>>) -> Response {
     println!("Request to listen to status!");
     let mut receiver = status_stream.subscribe().await;
     send_stream(ws, stream! {
         loop {
-            let data = format!("[{}]", receiver.borrow().machine_position.indexed_iter().map(|(_, v)| v).format(", "));
+            let data = {
+                let info = receiver.borrow();
+                serde_json::to_string(&common::MachineStatus{
+                    status: format!("{:?}", info.state),
+                    position: receiver.borrow().machine_position.indexed_iter().map(|(_, v)| *v).collect_vec()
+                }).unwrap()
+            };
             yield Message::Text(data);
             drop(receiver.changed().await);
         }

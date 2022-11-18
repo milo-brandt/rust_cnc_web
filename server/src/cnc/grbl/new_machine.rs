@@ -48,6 +48,8 @@ pub enum ImmediateRequest {
     Status {
         result: oneshot::Sender<GrblStateInfo>,
     },
+    FeedHold,
+    FeedResume,
 }
 pub struct MachineThreadInput {
     debug_stream: history_broadcast::Sender<MachineDebugEvent>,
@@ -108,6 +110,7 @@ impl<Write: AsyncWrite + Unpin> MachineThread<Write> {
                     GrblPosition::Work(pos) => pos + &self.work_coordinate_offset,
                 };
                 let state = GrblStateInfo {
+                    state: status_event.state,
                     machine_position,
                     work_coordinate_offset: self.work_coordinate_offset.clone(),
                 };
@@ -185,6 +188,12 @@ impl<Write: AsyncWrite + Unpin> MachineThread<Write> {
                     self.status_refresh = Box::pin(sleep(Duration::from_millis(1000)).fuse());
                 }
             }
+            ImmediateRequest::FeedHold => {
+                self.write_bytes(vec![b'!']).await.unwrap();
+            },
+            ImmediateRequest::FeedResume => {
+                self.write_bytes(vec![b'~']).await.unwrap();
+            },
         }
     }
 }

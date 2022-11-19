@@ -200,11 +200,8 @@ async fn listen_position(ws: WebSocketUpgrade, status_stream: Extension<Arc<Stat
     send_stream(ws, stream! {
         loop {
             let data = {
-                let info = receiver.borrow();
-                serde_json::to_string(&common::MachineStatus{
-                    status: format!("{:?}", info.state),
-                    position: receiver.borrow().machine_position.indexed_iter().map(|(_, v)| *v).collect_vec()
-                }).unwrap()
+                let info = receiver.borrow().clone();
+                serde_json::to_string(&info.to_full_info()).unwrap()
             };
             yield Message::Text(data);
             drop(receiver.changed().await);

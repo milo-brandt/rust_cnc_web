@@ -105,20 +105,15 @@ pub fn DebugPage(cx: Scope) -> View<DomNode> {
                         ws_next = ws.next().fuse();
                         match next_message {
                             Some(Ok(Message::Text(ws_message))) => {
-                                log::debug!("Received: {:?}", ws_message);
                                 values.push(ws_message);
                                 if next_update.is_terminated() {
                                     next_update = sleep(Duration::from_millis(10)).fuse();
                                 }
                             }
-                            Some(_) => {
-                                log::debug!("Received: ???");
-                            }
                             None => break
                         }
                     },
                     _ = &mut next_update => {
-                        log::debug!("Updating!");
                         message_list_sender.set(values.clone());
                     }
                 }

@@ -1,18 +1,7 @@
 use ndarray::Array1;
+pub use common::grbl::GrblState;
+use common::grbl::GrblFullInfo;
 
-// See: the Real-time Status Reports section at:  https://github.com/gnea/grbl/blob/master/doc/markdown/interface.md
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum GrblState {
-    Idle,
-    Run,
-    Hold(i64),
-    Jog,
-    Alarm,
-    Door(i64),
-    Check,
-    Home,
-    Sleep,
-}
 #[derive(Debug, Clone, PartialEq)]
 pub enum GrblPosition {
     Machine(Array1<f64>),
@@ -40,6 +29,15 @@ pub struct GrblStateInfo {
     pub state: GrblState,
     pub machine_position: Array1<f64>,
     pub work_coordinate_offset: Array1<f64>,
+}
+impl GrblStateInfo {
+    pub fn to_full_info(self) -> GrblFullInfo {
+        GrblFullInfo {
+            state: self.state,
+            machine_position: self.machine_position.into_raw_vec(),
+            work_coordinate_offset: self.work_coordinate_offset.into_raw_vec(),
+        }
+    }
 }
 
 impl GrblStatus {

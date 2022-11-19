@@ -2,7 +2,7 @@
 
 use std::{sync::Mutex, convert::Infallible, thread};
 
-use axum::{response::{sse::Event, Sse}, extract::{multipart::Field, ContentLengthLimit}};
+use axum::{response::{sse::Event, Sse}, extract::{multipart::Field, ContentLengthLimit}, handler::Handler};
 use cnc::grbl::messages::{GrblStateInfo};
 use futures::{Stream, Future, pin_mut};
 use hyper::server;
@@ -134,6 +134,16 @@ async fn setup_machine() -> (MachineInterface, impl Future<Output = ()>) {
     start_machine(reader, writer).await.unwrap()
 }
 
+fn immediate_command<F: Fn() -> ImmediateRequest + Clone + Send + 'static>(get_request: F) -> impl Handler<(Extension<Arc<MachineInterface>>,)> {
+    move |machine: Extension<Arc<MachineInterface>>| {
+        let request = get_request();
+        async move {
+            machine.immediate_write_stream.send(request).await.unwrap();
+            "Ok!".to_string()
+        }
+    }
+}
+
 async fn run_server(machine: MachineInterface) {
     let cors = CorsLayer::new()
     // allow `GET` and `POST` when accessing the resource
@@ -157,7 +167,8 @@ async fn run_server(machine: MachineInterface) {
         .route("/job/upload_file", post(upload))
         .route("/job/delete_file", delete(delete_file))
         .route("/list_files", get(get_gcode_list))
-        //.route("/ws", get(websocket_upgrade))
+        .route("/command/feed_hold", post(immediate_command(|| ImmediateRequest::FeedHold)))
+        .route("/command/feed_resume", post(immediate_command(|| ImmediateRequest::FeedResume)))
         .layer(cors)
         .layer(Extension(machine_arc.clone()))
         .layer(Extension(Arc::new(Broker::new())))

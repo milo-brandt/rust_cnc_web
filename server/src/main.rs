@@ -169,6 +169,7 @@ async fn run_server(machine: MachineInterface) {
         .route("/list_files", get(get_gcode_list))
         .route("/command/feed_hold", post(immediate_command(|| ImmediateRequest::FeedHold)))
         .route("/command/feed_resume", post(immediate_command(|| ImmediateRequest::FeedResume)))
+        .route("/command/reset", post(immediate_command(|| ImmediateRequest::Reset)))
         .layer(cors)
         .layer(Extension(machine_arc.clone()))
         .layer(Extension(Arc::new(Broker::new())))

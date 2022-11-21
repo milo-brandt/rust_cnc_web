@@ -50,6 +50,7 @@ pub enum ImmediateRequest {
     },
     FeedHold,
     FeedResume,
+    Reset,
 }
 pub struct MachineThreadInput {
     debug_stream: history_broadcast::Sender<MachineDebugEvent>,
@@ -193,6 +194,9 @@ impl<Write: AsyncWrite + Unpin> MachineThread<Write> {
             },
             ImmediateRequest::FeedResume => {
                 self.write_bytes(vec![b'~']).await.unwrap();
+            },
+            ImmediateRequest::Reset => {
+                self.write_bytes(vec![0x18]).await.unwrap();
             },
         }
     }

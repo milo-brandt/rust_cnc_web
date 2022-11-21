@@ -96,6 +96,12 @@ pub fn StatusHeader(cx: Scope) -> View<DomNode> {
             log::debug!("Result: {:?}", result);
         })
     });
+    let reset = create_ref(cx, |_event| {
+        spawn_local(async{
+            let result = Request::post("http://cnc:3000/command/reset").send().await;
+            log::debug!("Result: {:?}", result);
+        })
+    });
     view! { cx,
         div(class=css_style.get_class_name()) {
             ({
@@ -110,6 +116,7 @@ pub fn StatusHeader(cx: Scope) -> View<DomNode> {
                     "Start"
                 })
             }
+            button(on:click=reset) { "Reset" }
         }
     }
 }

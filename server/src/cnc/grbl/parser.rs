@@ -381,7 +381,7 @@ where
     Error: FromExternalError<&'a str, ParseIntError>,
 {
     preceded(tag("ALARM:"), parse_u64)
-        .map(GrblMessage::GrblError)
+        .map(GrblMessage::GrblAlarm)
         .parse(input)
 }
 fn parse_grbl_greeting<'a, Error: 'a + ParseError<&'a str>>(

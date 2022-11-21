@@ -122,6 +122,9 @@ impl<Write: AsyncWrite + Unpin> MachineThread<Write> {
             }
             GrblMessage::GrblError(index) => {
                 self.ready_for_gcode = true;
+                self.debug_stream.send(MachineDebugEvent::Warning(
+                    format!("Error received: {}!", GrblMessage::get_error_text(index)),
+                ));
                 let next_result = self.waiting_ok.pop_front();
                 match next_result {
                     Some(channel) => drop(channel.send(Err(index))),
@@ -131,7 +134,7 @@ impl<Write: AsyncWrite + Unpin> MachineThread<Write> {
                 }
             }
             GrblMessage::GrblAlarm(index) => self.debug_stream.send(MachineDebugEvent::Warning(
-                format!("received unexpected alarm {}!", index),
+                format!("Alarm received: {}!", GrblMessage::get_alarm_text(index)),
             )),
             GrblMessage::GrblOk => {
                 self.ready_for_gcode = true;

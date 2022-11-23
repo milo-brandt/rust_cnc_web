@@ -2,8 +2,9 @@
 //Also: https://material-components.github.io/material-components-web/classes/_mdc_textfield_component_.mdctextfield.html#constructor
 export function register_ripple(node) {
     console.log("Creating ripple", node);
-    //Also works? mdc.textField.MDCTextField.attachTo(node);
-    return new mdc.ripple.MDCRipple(node);
+    let ripple = new mdc.ripple.MDCRipple(node);
+    ripple.unbounded = true; // Does it work without this? No. Dunno why.
+    return ripple;
 }
 
 export function deregister_ripple(mdc_ripple) {

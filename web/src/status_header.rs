@@ -17,6 +17,8 @@ use std::time::Duration;
 use sycamore::futures::spawn_local_scoped;
 use common::grbl::GrblState;
 
+use crate::mdc::IconButton;
+
 pub struct GlobalInfo<'a> {
     pub grbl_info: &'a ReadSignal<Option<common::grbl::GrblFullInfo>>,
     pub job_info: &'a ReadSignal<String>,
@@ -74,10 +76,18 @@ pub fn StatusHeader(cx: Scope) -> View<DomNode> {
     let css_style = style! { r#"
         display: flex;
         flex-direction: column;
-        height: 5vh;
+        height: 15vh;
         width: 100vw;
         align-items: stretch;
         background-color: gray;
+        div button {
+            border: none;
+            background: none;
+            cursor: pointer;
+        }
+        div button img {
+            height: 2rem;
+        }
     "#
     }.expect("CSS should work");
     log::debug!("CSS class: {}", css_style.get_class_name());
@@ -85,7 +95,7 @@ pub fn StatusHeader(cx: Scope) -> View<DomNode> {
     let in_motion = create_selector(cx, || {
         (&*global_info.grbl_info.get()).as_ref().map_or(true, |v| if let GrblState::Hold(_) = v.state { false } else { true })
     });
-    let on_click = create_ref(cx, |_event| {
+    let on_click = create_ref(cx, || {
         let url = if *in_motion.get() {
             "http://cnc:3000/command/feed_hold"
         } else {
@@ -96,10 +106,79 @@ pub fn StatusHeader(cx: Scope) -> View<DomNode> {
             log::debug!("Result: {:?}", result);
         })
     });
-    let reset = create_ref(cx, |_event| {
+    let reset = create_ref(cx, || {
         spawn_local(async{
             let result = Request::post("http://cnc:3000/command/reset").send().await;
             log::debug!("Result: {:?}", result);
+        })
+    });
+    let unlock = create_ref(cx, || {
+        let line = "\\$X";
+        let request = Request::post("http://cnc:3000/debug/send")
+            .body(line)
+            .send();
+        log::debug!("Sending!");
+        spawn_local(async move {
+            log::debug!("Inside unlock!");
+            let result = request.await.expect("Request should go through!");
+            log::debug!("Sent unlock! {:?}", result);
+        });
+    });
+    let home_disabled = create_selector(cx, || {
+        (&*global_info.grbl_info.get()).as_ref().map_or(true, |v| {
+            match v.state {
+                GrblState::Idle => false,
+                GrblState::Run => false,
+                GrblState::Hold(_) => true,
+                GrblState::Jog => false,
+                GrblState::Alarm => false,
+                GrblState::Door(_) => true,
+                GrblState::Check => true,
+                GrblState::Home => true,
+                GrblState::Sleep => true,
+            }            
+        })
+    });
+    let home = create_ref(cx, || {
+        let line = "\\$H";
+        let request = Request::post("http://cnc:3000/debug/send")
+            .body(line)
+            .send();
+        log::debug!("Sending!");
+        spawn_local(async move {
+            log::debug!("Inside home!");
+            let result = request.await.expect("Request should go through!");
+            log::debug!("Sent home! {:?}", result);
+        });
+    });
+    let button_kind = create_selector(cx, || {
+        if *in_motion.get() {
+            "stop"
+        } else {
+            "play_arrow"
+        }.to_string()
+    });
+    let button_disabled = create_selector(cx, || {
+        (&*global_info.grbl_info.get()).as_ref().map_or(true, |v| {
+            match v.state {
+                GrblState::Idle => false,
+                GrblState::Run => false,
+                GrblState::Hold(_) => false,
+                GrblState::Jog => false,
+                GrblState::Alarm => true,
+                GrblState::Door(_) => true,
+                GrblState::Check => true,
+                GrblState::Home => true,
+                GrblState::Sleep => true,
+            }            
+        })
+    });
+    let unlock_disabled = create_selector(cx, || {
+        (&*global_info.grbl_info.get()).as_ref().map_or(true, |v| {
+            match v.state {
+                GrblState::Alarm => false,
+                _ => true,
+            }            
         })
     });
     view! { cx,
@@ -109,14 +188,12 @@ pub fn StatusHeader(cx: Scope) -> View<DomNode> {
                 let x: Option<&common::grbl::GrblFullInfo> = value.as_ref();
                 x.map_or("No!".to_string(), |v| format!("{:?} {:?} {}", v.state, v.work_position(), (*global_info.job_info.get())))
             }) br {}
-            button(on:click=on_click) {
-                (if *in_motion.get() {
-                    "Stop"
-                } else {
-                    "Start"
-                })
+            div {
+                IconButton(icon_name=button_kind, on_click=on_click, disabled=button_disabled)
+                IconButton(icon_name=create_signal(cx, "lock_open".to_string()), on_click=unlock, disabled=unlock_disabled)
+                IconButton(icon_name=create_signal(cx, "restart_alt".to_string()), on_click=reset)
+                IconButton(icon_name=create_signal(cx, "home".to_string()), on_click=home, disabled=home_disabled)
             }
-            button(on:click=reset) { "Reset" }
         }
     }
 }

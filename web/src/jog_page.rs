@@ -94,7 +94,7 @@ pub fn JogPage(cx: Scope) -> View<DomNode> {
             }
 
             div {}
-            div { JogButton(name="Y-".to_string(), unit_vector=(0.0, 1.0, 0.0), scale=amt) }
+            div { JogButton(name="Y-".to_string(), unit_vector=(0.0, -1.0, 0.0), scale=amt) }
             div {}
             div { JogButton(name="Z-".to_string(), unit_vector=(0.0, 0.0, -1.0), scale=amtz) }
         }

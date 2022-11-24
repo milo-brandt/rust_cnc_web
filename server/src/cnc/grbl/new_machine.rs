@@ -1,7 +1,10 @@
-use std::str::from_utf8_unchecked;
+use std::{str::from_utf8_unchecked, mem::MaybeUninit};
 
+use async_trait::async_trait;
+use chrono::Local;
 use futures::Future;
-
+use ringbuf::LocalRb;
+use crate::cnc::machine_writer::MachineWriter;
 use {
     super::{
         messages::{GrblMessage, GrblPosition, GrblStateInfo, ProbeEvent},
@@ -58,9 +61,8 @@ pub struct MachineThreadInput {
     immediate_write_stream: mpsc::Receiver<ImmediateRequest>,
 }
 
-struct MachineThread<Write: AsyncWrite + Unpin> {
-    write: Write,
-    ready_for_gcode: bool,
+struct MachineThread<Write: MachineWriter> {
+    writer: Write,
     debug_stream: history_broadcast::Sender<MachineDebugEvent>,
     waiting_ok: VecDeque<oneshot::Sender<Result<(), u64>>>,
     waiting_probe: VecDeque<oneshot::Sender<Result<ProbeEvent, u64>>>,
@@ -73,20 +75,13 @@ pub struct MachineInterface {
     pub write_stream: mpsc::Sender<WriteRequest>,
     pub immediate_write_stream: mpsc::Sender<ImmediateRequest>,
 }
-/*
-    #[pin]
-    read: Lines<BufReader<Read>>,
-    #[pin]
-    immediate_write_stream: mpsc::Receiver<ImmediateRequest>,
-    #[pin]
-    write_stream: mpsc::Receiver<WriteRequest>,
-
-*/
-impl<Write: AsyncWrite + Unpin> MachineThread<Write> {
-    async fn write_bytes(&mut self, bytes: Vec<u8>) -> Result<(), std::io::Error> {
-        self.write.write_all(&bytes).await?;
+impl<Write: MachineWriter> MachineThread<Write> {
+    fn log_send(&mut self, bytes: Vec<u8>) {
         self.debug_stream.send(MachineDebugEvent::Sent(bytes));
-        Ok(())
+    }
+    async fn send_immediate(&mut self, bytes: Vec<u8>) {
+        let bytes = self.writer.write_immediate(bytes).await.unwrap();
+        self.log_send(bytes);
     }
     async fn receive_line(&mut self, line: String) {
         self.debug_stream
@@ -121,7 +116,7 @@ impl<Write: AsyncWrite + Unpin> MachineThread<Write> {
                 self.status_refresh = Box::pin(Fuse::terminated());
             }
             GrblMessage::GrblError(index) => {
-                self.ready_for_gcode = true;
+                self.writer.pop_received_line().await.unwrap().map(|v| self.log_send(v));
                 self.debug_stream.send(MachineDebugEvent::Warning(
                     format!("Error received: {}!", GrblMessage::get_error_text(index)),
                 ));
@@ -137,7 +132,7 @@ impl<Write: AsyncWrite + Unpin> MachineThread<Write> {
                 format!("Alarm received: {}!", GrblMessage::get_alarm_text(index)),
             )),
             GrblMessage::GrblOk => {
-                self.ready_for_gcode = true;
+                self.writer.pop_received_line().await.unwrap().map(|v| self.log_send(v));
                 let next_result = self.waiting_ok.pop_front();
                 match next_result {
                     Some(channel) => drop(channel.send(Ok(()))),
@@ -155,8 +150,7 @@ impl<Write: AsyncWrite + Unpin> MachineThread<Write> {
     async fn plain_send(&mut self, request: WriteRequest) {
         match request {
             WriteRequest::Plain { data, result } => {
-                self.ready_for_gcode = false;
-                self.write_bytes(data).await.unwrap();
+                self.writer.enqueue_line(data).await.unwrap().map(|v| self.log_send(v));
                 self.waiting_ok.push_back(result);
             }
             WriteRequest::Probe {
@@ -164,8 +158,7 @@ impl<Write: AsyncWrite + Unpin> MachineThread<Write> {
                 result_ok,
                 result,
             } => {
-                self.ready_for_gcode = false;
-                self.write_bytes(data).await.unwrap();
+                self.writer.enqueue_line(data).await.unwrap().map(|v| self.log_send(v));
                 self.waiting_ok.push_back(result_ok);
                 self.waiting_probe.push_back(result);
             }
@@ -175,7 +168,7 @@ impl<Write: AsyncWrite + Unpin> MachineThread<Write> {
         }
     }
     async fn rerequest_status(&mut self) {
-        self.write_bytes(vec![b'?']).await.unwrap();
+        self.send_immediate(vec![b'?']).await;
         self.status_refresh = Box::pin(sleep(Duration::from_millis(1000)).fuse());
         self.debug_stream.send(MachineDebugEvent::Warning(
             "Needed to resend status query!".to_string(),
@@ -188,25 +181,24 @@ impl<Write: AsyncWrite + Unpin> MachineThread<Write> {
                 if self.status_refresh.is_terminated() {
                     // Nominally required for grbl interface - can get cancelled time to time.
                     // Waits 1000 ms for response to ? before resending; note that faster polling is allowed if the response has come back.
-                    self.write_bytes(vec![b'?']).await.unwrap();
-                    self.status_refresh = Box::pin(sleep(Duration::from_millis(1000)).fuse());
+                    self.send_immediate(vec![b'?']).await;
                 }
             }
             ImmediateRequest::FeedHold => {
-                self.write_bytes(vec![b'!']).await.unwrap();
+                self.send_immediate(vec![b'!']).await;
             },
             ImmediateRequest::FeedResume => {
-                self.write_bytes(vec![b'~']).await.unwrap();
+                self.send_immediate(vec![b'~']).await;
             },
             ImmediateRequest::Reset => {
-                self.write_bytes(vec![0x18]).await.unwrap();
+                self.send_immediate(vec![0x18]).await;
             },
         }
     }
 }
 pub async fn start_machine<
     Read: AsyncRead + Unpin + Send + 'static,
-    Write: AsyncWrite + Send + Unpin + 'static,
+    Write: MachineWriter + Unpin + Send + 'static,
 >(
     reader: Read,
     mut writer: Write,
@@ -232,7 +224,7 @@ pub async fn start_machine<
     println!("Greeted...");
     // Then, ask for status and store the WCO!
     debug_stream.send(MachineDebugEvent::Sent(vec![b'?']));
-    match writer.write_all(b"?").await {
+    match writer.write_immediate(b"?".to_vec()).await {
         Ok(_) => {}
         Err(_) => return None,
     }
@@ -251,8 +243,7 @@ pub async fn start_machine<
     println!("Status received... spawning machine thread");
     let machine_future = async move {
         let mut machine_thread = MachineThread {
-            write: writer,
-            ready_for_gcode: true,
+            writer,
             debug_stream,
             waiting_ok: Default::default(),
             waiting_probe: Default::default(),
@@ -268,7 +259,7 @@ pub async fn start_machine<
                         machine_thread.receive_line(line).await
                     }
                 },
-                write_request = write_stream_receive.recv(), if machine_thread.ready_for_gcode => {
+                write_request = write_stream_receive.recv(), if machine_thread.writer.can_enqueue_line() => {
                     if let Some(request) = write_request {
                         machine_thread.plain_send(request).await
                     }

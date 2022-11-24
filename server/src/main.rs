@@ -9,6 +9,7 @@ use hyper::server;
 use serde::Serialize;
 use tokio::{sync::{mpsc, broadcast, watch}, spawn, time::MissedTickBehavior, io::AsyncWriteExt, fs::{read_dir, remove_file}};
 use chrono::offset::Local;
+use cnc::machine_writer::BufferCountingWriter;
 mod cnc;
 mod util;
 mod oneway_websocket;
@@ -131,7 +132,7 @@ async fn setup_machine() -> (MachineInterface, impl Future<Output = ()>) {
     let (reader, writer) =
         cnc::connection::open_and_reset_arduino_like_serial("/dev/ttyUSB0").await;
     println!("Waiting for greeting!");
-    start_machine(reader, writer).await.unwrap()
+    start_machine(reader, BufferCountingWriter::new(writer, 112)).await.unwrap()
 }
 
 fn immediate_command<F: Fn() -> ImmediateRequest + Clone + Send + 'static>(get_request: F) -> impl Handler<(Extension<Arc<MachineInterface>>,)> {

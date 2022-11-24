@@ -224,23 +224,23 @@ impl<Write: MachineWriter> MachineThread<Write> {
             self.send_immediate(vec![b'?']).await;
         }
     }
-}
-
-
-async fn wait_for_greeting<Read: AsyncBufRead + Unpin + Send>(lines_reader: &mut Lines<Read>) -> Result<(), std::io::Error> {
-    loop {
-        match lines_reader.next_line().await {
-            Ok(Some(line)) => {
-                // debug_stream.send(MachineDebugEvent::Received(line.clone()));
-                if let GrblMessage::GrblGreeting = parse_grbl_line(&line) {
-                    return Ok(())
+    async fn wait_for_greeting<Read: AsyncBufRead + Unpin + Send>(&mut self, lines_reader: &mut Lines<Read>) -> Result<(), std::io::Error> {
+        loop {
+            match lines_reader.next_line().await {
+                Ok(Some(line)) => {
+                    self.debug_stream.send(MachineDebugEvent::Received(line.clone()));
+                    if let GrblMessage::GrblGreeting = parse_grbl_line(&line) {
+                        return Ok(())
+                    }
                 }
+                Ok(None) => return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "unexpected eof!")),
+                Err(e) => return Err(e),
             }
-            Ok(None) => return Err(std::io::Error::new(std::io::ErrorKind::UnexpectedEof, "unexpected eof!")),
-            Err(e) => return Err(e),
         }
-    }
+    }    
 }
+
+
 
 
 pub async fn start_machine<
@@ -251,13 +251,10 @@ pub async fn start_machine<
     writer: Write,
 ) -> Option<(MachineInterface, impl Future<Output=()>)> {
     let mut lines_reader = BufReader::new(reader).lines();
-    // First: loop until we get a greeting.
-    println!("Waiting for greeting...");
     let debug_stream = history_broadcast::Sender::new(512);
     let (write_stream_send, mut write_stream_receive) = mpsc::channel(32);
     let (immediate_write_stream_send, mut immediate_write_stream_receive) = mpsc::channel(32);
     let debug_stream_receiver = debug_stream.subscribe_with_history_count(0);
-    println!("Status received... spawning machine thread");
     let machine_future = async move {
         let mut machine_thread = MachineThread {
             writer,
@@ -269,7 +266,7 @@ pub async fn start_machine<
             work_coordinate_offset: None,
         };
         'outer: loop {
-            wait_for_greeting(&mut lines_reader).await.unwrap();
+            machine_thread.wait_for_greeting(&mut lines_reader).await.unwrap();
             machine_thread.reset().await;  // Reset here: we now know that no more messages from the prior world will arrive.
             loop {
                 select! {

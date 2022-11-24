@@ -286,7 +286,7 @@ async fn index(message: RawBody, machine: Extension<Arc<MachineInterface>>) -> S
             .unwrap();
         match receiver.await {
             Ok(Ok(())) => "Success!".to_string(),
-            Ok(Err(id)) => format!("Failed: {}", id),
+            Ok(Err(id)) => format!("Failed: {:?}", id),
             Err(_) => "Internal error?".to_string(),
         }
     }

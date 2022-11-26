@@ -3,15 +3,15 @@
 */
 
 use core::ascii;
-use std::{sync::Arc, future::IntoFuture, cell::RefCell};
+use std::{sync::Arc, future::IntoFuture, cell::RefCell, pin::Pin};
 
-use crate::{cnc::{gcode::{GCodeLine, GCodeFormatSpecification}}, util::{local_generation_counter::LocalGenerationCounter, fixed_rb::{FixedRb, make_fixed_rb}, history_broadcast, format_bytes::format_byte_string}};
+use crate::{cnc::{gcode::{GCodeLine, GCodeFormatSpecification}}, util::{local_generation_counter::LocalGenerationCounter, fixed_rb::{FixedRb}, history_broadcast, format_bytes::format_byte_string, future_or_pending::FutureOrPending}};
 
 use super::{handler::Handler, new_machine::{LineError, WriteRequest, ProbeError, ImmediateRequest}, messages::{ProbeEvent, GrblStateInfo}};
 use async_trait::async_trait;
 use chrono::{DateTime, Local};
 use futures::{Future, io::Write, FutureExt, future::OptionFuture};
-use tokio::{sync::{mpsc, oneshot, watch}, select, spawn};
+use tokio::{sync::{mpsc, oneshot, watch}, select, spawn, runtime::Handle};
 
 #[derive(Debug)]
 pub enum Message {
@@ -27,6 +27,7 @@ pub enum ImmediateMessage {
     Pause,
     Resume,
     Stop,
+    Reset,
     InitiateJob(oneshot::Sender<Option<JobHandle>>),
 }
 // ... if we wanted, we could go further and refactor out this logging functionality ...
@@ -138,14 +139,18 @@ impl ImmediateHandle {
     }
 }
 
-
+struct HandlerPrivateState {
+    job_receiver: Option<mpsc::Receiver<Message>>,
+    immediate_receiver: mpsc::Receiver<ImmediateMessage>,
+}
+struct HandlerSharedState {
+    waiting_writes: FixedRb<WriteRequest, 4>,
+    waiting_immediate: FixedRb<ImmediateRequest, 4>,
+}
 pub struct StandardHandler {
     format: Arc<GCodeFormatSpecification>,
-    job_receiver: RefCell<Option<mpsc::Receiver<Message>>>,
-    immediate_receiver: RefCell<mpsc::Receiver<ImmediateMessage>>,
-
-    waiting_writes: RefCell<FixedRb<WriteRequest, 4>>,
-    waiting_immediate: RefCell<FixedRb<ImmediateRequest, 4>>,
+    private_state: RefCell<HandlerPrivateState>,
+    shared_state: RefCell<HandlerSharedState>,
     generation_counter: LocalGenerationCounter,
 
     debug_stream: history_broadcast::Sender<MachineDebugEvent>,
@@ -156,6 +161,10 @@ pub struct StandardHandlerParts {
     pub immediate_handle: ImmediateHandle,
     pub debug_rx: history_broadcast::Receiver<MachineDebugEvent>
 }
+/*
+    Utilities for working with a fixed ring buffer...
+*/
+
 
 impl StandardHandler {
     pub fn create(format: GCodeFormatSpecification) -> StandardHandlerParts {
@@ -165,11 +174,14 @@ impl StandardHandler {
         StandardHandlerParts {
             handler: StandardHandler {
                 format: Arc::new(format),
-                job_receiver: RefCell::new(None),
-                immediate_receiver: RefCell::new(immediate_rx),
-
-                waiting_writes: RefCell::new(make_fixed_rb()),
-                waiting_immediate: RefCell::new(make_fixed_rb()),
+                private_state: RefCell::new(HandlerPrivateState {
+                    job_receiver: None,
+                    immediate_receiver: immediate_rx,
+                }),
+                shared_state: RefCell::new(HandlerSharedState {
+                    waiting_writes: FixedRb::new(),
+                    waiting_immediate: FixedRb::new(),
+                }),
                 generation_counter: LocalGenerationCounter::new(),
 
                 debug_stream: debug_tx,
@@ -179,6 +191,20 @@ impl StandardHandler {
             debug_rx
         }
     }
+
+    fn mutate<F: FnOnce(&mut HandlerSharedState) -> T, T>(&self, f: F) -> T {
+        f(&mut *self.shared_state.borrow_mut())
+    }
+    fn mutate_and_advance<F: FnOnce(&mut HandlerSharedState) -> T, T>(&self, f: F) -> T {
+        self.generation_counter.advance();
+        self.mutate(f)
+    }
+    fn stop_job(&self, private: &mut HandlerPrivateState) {
+        self.mutate(|inner| inner.waiting_writes.clear());
+        drop(self.job_status.send(None));
+        private.job_receiver = None;
+    }
+
 }
 
 #[async_trait(?Send)]
@@ -188,7 +214,7 @@ impl Handler for StandardHandler {
     */
     async fn next_write_request(&self) -> WriteRequest {
         loop {
-            if let Some(request) = self.waiting_writes.borrow_mut().split_ref().1.pop() {
+            if let Some(request) = self.mutate(|inner| inner.waiting_writes.pop()) {
                 self.generation_counter.advance();  // Restart run loop!
                 return request;
             }
@@ -197,7 +223,7 @@ impl Handler for StandardHandler {
     }
     async fn next_immediate_request(&self) -> ImmediateRequest {
         loop {
-            if let Some(request) = self.waiting_immediate.borrow_mut().split_ref().1.pop() {
+            if let Some(request) = self.mutate(|inner| inner.waiting_immediate.pop()) {
                 self.generation_counter.advance();  // Restart run loop!
                 return request;
             }
@@ -205,39 +231,48 @@ impl Handler for StandardHandler {
         }
     }
     async fn run(&self) {
-        let mut immediate_receiver = self.immediate_receiver.borrow_mut();
-        let mut job_receiver = self.job_receiver.borrow_mut();
+        let mut private = self.private_state.borrow_mut();
+        let private = &mut *private;
         loop {
             select! {
                 biased;
-                immediate = immediate_receiver.recv(), if !self.waiting_immediate.borrow_mut().split_ref().1.is_full() => {
+                immediate = private.immediate_receiver.recv(), if !self.mutate(|inner| inner.waiting_immediate.is_full()) => {
                     match immediate {
                         Some(ImmediateMessage::GetState(tx)) => {
-                            self.waiting_immediate.borrow_mut().split_ref().0.push(ImmediateRequest::Status{ result: tx }).unwrap();
-                            self.generation_counter.advance();
+                            self.mutate_and_advance(|inner|
+                                inner.waiting_immediate.push(ImmediateRequest::Status{ result: tx }).unwrap()
+                            );
                         }
                         Some(ImmediateMessage::GetJobStatus(tx)) => {
                             drop(tx.send(self.job_status.subscribe()))
                         }
                         Some(ImmediateMessage::Pause) => {
                             // TODO: Should perhaps discriminate based on current state & check that we really do stop (e.g. while homing!)
-                            self.waiting_immediate.borrow_mut().split_ref().0.push(ImmediateRequest::FeedHold).unwrap();
-                            self.generation_counter.advance();
+                            self.mutate_and_advance(|inner|
+                                inner.waiting_immediate.push(ImmediateRequest::FeedHold).unwrap()
+                            );
                         }
                         Some(ImmediateMessage::Resume) => {
-                            self.waiting_immediate.borrow_mut().split_ref().0.push(ImmediateRequest::FeedResume).unwrap();
-                            self.generation_counter.advance();
+                            self.mutate_and_advance(|inner|
+                                inner.waiting_immediate.push(ImmediateRequest::FeedResume).unwrap()
+                            );
                         }
                         Some(ImmediateMessage::Stop) => {
+                            self.stop_job(private);
+                            // TODO: Also reset when ready!
+                            self.mutate_and_advance(|inner|
+                                inner.waiting_immediate.push(ImmediateRequest::FeedHold).unwrap()
+                            );
+                        }
+                        Some(ImmediateMessage::Reset) => {
                             // Remove the current job!
-                            self.waiting_writes.borrow_mut().split_ref().1.clear();
-                            drop(self.job_status.send(None));
-                            *job_receiver = None;
-                            self.waiting_immediate.borrow_mut().split_ref().0.push(ImmediateRequest::Reset).unwrap();
-                            self.generation_counter.advance();
+                            self.stop_job(private);
+                            self.mutate_and_advance(|inner|
+                                inner.waiting_immediate.push(ImmediateRequest::Reset).unwrap()
+                            );
                         }
                         Some(ImmediateMessage::InitiateJob(tx)) => {
-                            if job_receiver.is_some() {
+                            if private.job_receiver.is_some() {
                                 drop(tx.send(None))
                             } else {
                                 let (job_tx, job_rx) = mpsc::channel(16);
@@ -245,22 +280,23 @@ impl Handler for StandardHandler {
                                     format_specification: self.format.clone(),
                                     sender: job_tx
                                 })));
-                                *job_receiver = Some(job_rx);
+                                private.job_receiver = Some(job_rx);
                             }
                         }
                         None => ()
                     }
                 }
-                line = OptionFuture::from(job_receiver.as_mut().map(mpsc::Receiver::recv)), if job_receiver.is_some() && !self.waiting_writes.borrow_mut().split_ref().1.is_full() && !self.waiting_immediate.borrow_mut().split_ref().1.is_full() => {
-                    let line = line.unwrap();  // The outer future must resolve!
+                line = FutureOrPending::from(private.job_receiver.as_mut().map(mpsc::Receiver::recv)), if self.mutate(|inner| !inner.waiting_writes.is_full() && !inner.waiting_immediate.is_full()) => {
                     match line {
                         Some(Message::GetState(tx)) => {
-                            self.waiting_immediate.borrow_mut().split_ref().0.push(ImmediateRequest::Status{ result: tx }).unwrap();
-                            self.generation_counter.advance();
+                            self.mutate_and_advance(|inner|
+                                inner.waiting_immediate.push(ImmediateRequest::Status{ result: tx }).unwrap()
+                            );
                         },
                         Some(Message::Write(write_request)) => {
-                            self.waiting_writes.borrow_mut().split_ref().0.push(write_request).unwrap();
-                            self.generation_counter.advance();
+                            self.mutate_and_advance(|inner|
+                                inner.waiting_writes.push(write_request).unwrap()
+                            );
                         },
                         Some(Message::Comment(message)) => {
                             self.debug_stream.send(MachineDebugEvent::Comment(Local::now(), message));
@@ -270,7 +306,7 @@ impl Handler for StandardHandler {
                         }
                         None => {
                             drop(self.job_status.send(None));
-                            *job_receiver = None; // job hung up; must be done!
+                            private.job_receiver = None;  // job hung up - must be done
                         }
                     }
                 }

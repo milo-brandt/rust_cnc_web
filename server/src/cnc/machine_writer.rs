@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use ringbuf::LocalRb;
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 
-use crate::util::fixed_rb::{FixedRb, make_fixed_rb};
+use crate::util::fixed_rb::{FixedRb};
 
 /*
     Struct for writing to Grbl, such that never more than a fixed amount of line-oriented
@@ -39,7 +39,7 @@ impl<Write: AsyncWrite + Unpin + Send> MachineWriter for BufferCountingWriter<Wr
     }
     fn clear_waiting(&mut self) {
         // Clear any pending writes and forget them.
-        self.waiting_lines.split_ref().1.clear();
+        self.waiting_lines.clear();
         self.next_line = None;
         self.waiting_size = 0;
     }
@@ -61,7 +61,7 @@ impl<Write: AsyncWrite + Unpin + Send> MachineWriter for BufferCountingWriter<Wr
     async fn pop_received_line(&mut self) -> Result<Option<Vec<u8>>, std::io::Error> {
         // Signal that a line has been processed and its buffer space free for writing.
         // Should be called only after at least as many calls to enqueue_line; may panic otherwise.
-        let received_length = self.waiting_lines.split_ref().1.pop().unwrap();
+        let received_length = self.waiting_lines.pop().unwrap();
         self.waiting_size -= received_length;
         if let Some(next_line) = &self.next_line {
             let length = next_line.len() as u16;
@@ -82,7 +82,7 @@ where
             write,
             max_waiting_size,
             waiting_size: 0,
-            waiting_lines: make_fixed_rb(),
+            waiting_lines: FixedRb::new(),
             next_line: None,
         }
     }
@@ -90,10 +90,10 @@ where
         Private internals
     */
     fn can_write_line_immediate_with_length(&mut self, length: u16) -> bool {
-        return self.waiting_size + length <= self.max_waiting_size && !self.waiting_lines.split_ref().0.is_full();
+        return self.waiting_size + length <= self.max_waiting_size && !self.waiting_lines.is_full();
     }
     async fn write_line_immediate(&mut self, bytes: Vec<u8>, length: u16) -> Result<Vec<u8>, std::io::Error> {
-        self.waiting_lines.split_ref().0.push(length).unwrap();
+        self.waiting_lines.push(length).unwrap();
         self.waiting_size += length;
         self.write_immediate(bytes).await
     }

@@ -100,6 +100,7 @@ pub struct GCodeLine {
     pub modals: Vec<GCodeModal>,
     pub command: Option<GCodeCommand>,
 }
+#[derive(Debug)]
 pub struct GCodeFormatSpecification {
     pub axis_letters: Vec<u8>,
     pub offset_axis_letters: Vec<u8>,

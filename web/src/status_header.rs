@@ -113,7 +113,7 @@ pub fn StatusHeader(cx: Scope) -> View<DomNode> {
         })
     });
     let unlock = create_ref(cx, || {
-        let line = "\\$X";
+        let line = "$X";
         let request = Request::post("http://cnc:3000/debug/send")
             .body(line)
             .send();

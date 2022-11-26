@@ -83,7 +83,7 @@ impl<T: Clone + Send> Sender<T> {
             }),
         }
     }
-    pub fn send(&mut self, value: T) {
+    pub fn send(&self, value: T) {
         let history = &*self.state;
         let mut lock = history.inner.write().unwrap();
         unsafe {
@@ -179,7 +179,7 @@ mod test {
 
     #[test]
     fn test_history_buffer() {
-        let mut sender = Sender::<u64>::new(4);
+        let sender = Sender::<u64>::new(4);
         let mut receiver = sender.subscribe_with_history_count(10);
         let mut receiver_2 = sender.subscribe_with_history_count(10);
         assert_eq!(receiver.try_recv(), Err(TryReceiverError::Empty));

@@ -4,6 +4,8 @@ use async_trait::async_trait;
 use ringbuf::LocalRb;
 use tokio::io::{AsyncWrite, AsyncWriteExt};
 
+use crate::util::fixed_rb::{FixedRb, make_fixed_rb};
+
 /*
     Struct for writing to Grbl, such that never more than a fixed amount of line-oriented
 commands can be pending at once. Also provides a way for immediate commands to pass through.
@@ -22,7 +24,7 @@ pub struct BufferCountingWriter<Write> {
     write: Write,
     max_waiting_size: u16,
     waiting_size: u16,
-    waiting_lines: LocalRb<u16, [MaybeUninit<u16>; 8]>,
+    waiting_lines: FixedRb<u16, 8>,
     next_line: Option<Vec<u8>>,
 }
 #[async_trait]
@@ -71,12 +73,6 @@ impl<Write: AsyncWrite + Unpin + Send> MachineWriter for BufferCountingWriter<Wr
         Ok(None)
     }
 }
-
-fn make_fixed_local_rb<T, const N: usize>() -> LocalRb<T, [MaybeUninit<T>; N]> {
-    unsafe {
-        LocalRb::from_raw_parts(MaybeUninit::uninit().assume_init(), 0, 0)
-    }
-}
 impl<Write> BufferCountingWriter<Write>
 where
     Write: AsyncWrite + Unpin + Send
@@ -86,7 +82,7 @@ where
             write,
             max_waiting_size,
             waiting_size: 0,
-            waiting_lines: make_fixed_local_rb(),
+            waiting_lines: make_fixed_rb(),
             next_line: None,
         }
     }

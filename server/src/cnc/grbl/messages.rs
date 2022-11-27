@@ -10,6 +10,18 @@ pub enum GrblPosition {
     Work(Array1<f64>),
 }
 #[derive(Debug, Clone, PartialEq)]
+pub struct GrblResidualStatus {
+    pub work_coordinate_offset: Option<Array1<f64>>,
+    pub feed_override: u8,
+    pub rapid_override: u8,
+    pub spindle_override: u8,
+}
+impl GrblResidualStatus {
+    pub fn new() -> Self {
+        GrblResidualStatus { work_coordinate_offset: None, feed_override: 100, rapid_override: 100, spindle_override: 100 }
+    }
+}
+#[derive(Debug, Clone, PartialEq)]
 pub struct GrblStatus {
     pub state: GrblState,
     pub machine_position: GrblPosition,
@@ -20,28 +32,12 @@ pub struct GrblStatus {
     pub work_coordinate_offset: Option<Array1<f64>>,
     pub line_number: Option<u64>,
     pub pins: Option<String>,
-    pub feed_override: Option<f64>,
-    pub rapid_override: Option<f64>,
-    pub spindle_override: Option<f64>,
+    pub feed_override: Option<u8>,
+    pub rapid_override: Option<u8>,
+    pub spindle_override: Option<u8>,
     pub accessory_state: Option<String>,
     pub unknown_terms: Vec<String>,
 }
-#[derive(Debug, Clone, PartialEq)]
-pub struct GrblStateInfo {
-    pub state: GrblState,
-    pub machine_position: Array1<f64>,
-    pub work_coordinate_offset: Array1<f64>,
-}
-impl GrblStateInfo {
-    pub fn to_full_info(self) -> GrblFullInfo {
-        GrblFullInfo {
-            state: self.state,
-            machine_position: self.machine_position.into_raw_vec(),
-            work_coordinate_offset: self.work_coordinate_offset.into_raw_vec(),
-        }
-    }
-}
-
 impl GrblStatus {
     pub fn new(state: GrblState, machine_position: GrblPosition) -> Self {
         GrblStatus {
@@ -61,7 +57,64 @@ impl GrblStatus {
             unknown_terms: Vec::new(),
         }
     }
+    fn enhance_with_residual(&mut self, residual: &mut GrblResidualStatus) {
+        fn residual_sync<T: Clone>(received: &mut Option<T>, residual: &mut T) {
+            match received {
+                Some(value) => *residual = value.clone(),
+                None => *received = Some(residual.clone())
+            }
+        }
+        fn residual_sync_optional<T: Clone>(received: &mut Option<T>, residual: &mut Option<T>) {
+            match received {
+                Some(value) => *residual = Some(value.clone()),
+                None => *received = residual.clone()
+            }
+        }
+        residual_sync(&mut self.feed_override, &mut residual.feed_override);
+        residual_sync(&mut self.rapid_override, &mut residual.rapid_override);
+        residual_sync(&mut self.spindle_override, &mut residual.spindle_override);
+        residual_sync_optional(&mut self.work_coordinate_offset, &mut residual.work_coordinate_offset);
+    }
+    pub fn to_state_with_residual(mut self, residual: &mut GrblResidualStatus) -> GrblStateInfo {
+        // Precondition: either this or the residual needs to have a work coordinate offset.
+        self.enhance_with_residual(residual);
+        GrblStateInfo {
+            state: self.state,
+            machine_position: match self.machine_position {
+                GrblPosition::Machine(pos) => pos,
+                GrblPosition::Work(pos) => pos + self.work_coordinate_offset.as_ref().unwrap(),
+            },
+            work_coordinate_offset: self.work_coordinate_offset.unwrap(),
+            feed_override: self.feed_override.unwrap(),
+            rapid_override: self.rapid_override.unwrap(),
+            spindle_override: self.spindle_override.unwrap(),
+        }
+    }
 }
+
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct GrblStateInfo {
+    pub state: GrblState,
+    pub machine_position: Array1<f64>,
+    pub work_coordinate_offset: Array1<f64>,
+    pub feed_override: u8,
+    pub rapid_override: u8,
+    pub spindle_override: u8,
+}
+impl GrblStateInfo {
+    pub fn to_full_info(self) -> GrblFullInfo {
+        GrblFullInfo {
+            state: self.state,
+            machine_position: self.machine_position.into_raw_vec(),
+            work_coordinate_offset: self.work_coordinate_offset.into_raw_vec(),
+            feed_override: self.feed_override,
+            rapid_override: self.rapid_override,
+            spindle_override: self.spindle_override,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProbeEvent {
     pub success: bool,

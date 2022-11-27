@@ -7,7 +7,7 @@ use std::{sync::Arc, future::IntoFuture, cell::{RefCell, Cell}, pin::Pin, time::
 
 use crate::{cnc::{gcode::{GCodeLine, GCodeFormatSpecification}}, util::{local_generation_counter::LocalGenerationCounter, fixed_rb::{FixedRb}, history_broadcast, format_bytes::format_byte_string, future_or_pending::FutureOrPending}};
 
-use super::{handler::Handler, new_machine::{LineError, WriteRequest, ProbeError, ImmediateRequest}, messages::{ProbeEvent, GrblStateInfo}};
+use super::{handler::{Handler, SpeedOverride}, new_machine::{LineError, WriteRequest, ProbeError, ImmediateRequest}, messages::{ProbeEvent, GrblStateInfo}};
 use async_trait::async_trait;
 use chrono::{DateTime, Local};
 use common::grbl::GrblState;
@@ -29,6 +29,7 @@ pub enum ImmediateMessage {
     Resume,
     Stop,
     Reset,
+    OverrideSpeed(SpeedOverride),
     InitiateJob(oneshot::Sender<Option<JobHandle>>),
 }
 // ... if we wanted, we could go further and refactor out this logging functionality ...
@@ -117,6 +118,9 @@ impl ImmediateHandle {
     }
     pub async fn reset(&self) {
         self.sender.send(ImmediateMessage::Reset).await.unwrap()
+    }
+    pub async fn override_speed(&self, speed_override: SpeedOverride) {
+        self.sender.send(ImmediateMessage::OverrideSpeed(speed_override)).await.unwrap()
     }
     pub async fn get_job_handle(&self) -> Option<JobHandle> {
         let (tx, rx) = oneshot::channel();
@@ -364,6 +368,11 @@ impl Handler for StandardHandler {
                                 })));
                                 private.job_receiver = Some(job_rx);
                             }
+                        },
+                        Some(ImmediateMessage::OverrideSpeed(speed_override)) => {
+                            self.mutate_and_advance(|inner|
+                                inner.waiting_immediate.push(ImmediateRequest::OverrideSpeed(speed_override)).unwrap()
+                            );
                         }
                         None => ()
                     }

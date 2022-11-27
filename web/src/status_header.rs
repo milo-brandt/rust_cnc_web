@@ -72,6 +72,48 @@ pub fn global_info<'a>(cx: Scope<'a>) -> &'a GlobalInfo<'a> {
 
 
 #[component]
+pub fn OverrideController(cx: Scope) -> View<DomNode> {
+    let global_info: &GlobalInfo = use_context(cx);
+    let callback_for_url = move |url: String| {
+        create_ref(cx, move || {
+            let url = url.clone();
+            spawn_local(async move {
+                let result = Request::post(&url).send().await;
+                log::debug!("Result: {:?}", result);
+            })    
+        })
+    };
+    let feed_reset = callback_for_url("http://cnc:3000/command/override/feed/reset".into());
+    let feed_increase_10 = callback_for_url("http://cnc:3000/command/override/feed/plus10".into());
+    let feed_increase_1 = callback_for_url("http://cnc:3000/command/override/feed/plus1".into());
+    let feed_decrease_1 = callback_for_url("http://cnc:3000/command/override/feed/minus1".into());
+    let feed_decrease_10 = callback_for_url("http://cnc:3000/command/override/feed/minus10".into());
+
+    let status = create_selector(cx, move || {
+        //let value = &*global_info.grbl_info.get();
+        //let x: Option<&common::grbl::GrblFullInfo> = value.as_ref();
+        //x.map_or("???".to_string(), |v| format!("{}", v.feed_override))
+        "Hello".to_string()
+    });
+
+    view! { cx,
+        div {
+            IconButton(icon_name=create_signal(cx, "keyboard_double_arrow_down".into()), on_click=feed_decrease_10)
+            IconButton(icon_name=create_signal(cx, "keyboard_arrow_down".into()), on_click=feed_decrease_1)
+            ({
+                let value = &*global_info.grbl_info.get();
+                let x: Option<&common::grbl::GrblFullInfo> = value.as_ref();
+                x.map_or("???".to_string(), |v| v.feed_override.to_string())
+            })
+            IconButton(icon_name=create_signal(cx, "restart_alt".into()), on_click=feed_reset)
+            IconButton(icon_name=create_signal(cx, "keyboard_arrow_up".into()), on_click=feed_increase_1)
+            IconButton(icon_name=create_signal(cx, "keyboard_double_arrow_up".into()), on_click=feed_increase_10)
+
+        }
+    }
+}
+
+#[component]
 pub fn StatusHeader(cx: Scope) -> View<DomNode> {
     let css_style = style! { r#"
         display: flex;
@@ -200,7 +242,8 @@ pub fn StatusHeader(cx: Scope) -> View<DomNode> {
                 IconButton(icon_name=create_signal(cx, "restart_alt".to_string()), on_click=stop)
                 IconButton(icon_name=create_signal(cx, "home".to_string()), on_click=home, disabled=home_disabled)
                 IconButton(icon_name=create_signal(cx, "cancel".to_string()), on_click=reset)
-            }
+            } br {}
+            OverrideController
         }
     }
 }

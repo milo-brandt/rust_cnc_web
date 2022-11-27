@@ -17,6 +17,8 @@ use oneway_websocket::send_stream;
 use tokio::runtime::{Runtime, Builder};
 use tower_http::catch_panic::CatchPanicLayer;
 use util::{history_broadcast, format_bytes::format_byte_string};
+
+use crate::cnc::grbl::handler::SpeedOverride;
 use {
     async_stream::stream,
     axum::{
@@ -164,6 +166,23 @@ async fn run_server(machine: ImmediateHandle, debug_rx: history_broadcast::Recei
         .route("/command/feed_resume", post(immediate_command(|handle| async move { handle.resume().await; })))
         .route("/command/stop", post(immediate_command(|handle| async move { handle.stop().await; })))
         .route("/command/reset", post(immediate_command(|handle| async move { handle.reset().await; })))
+
+        .route("/command/override/feed/reset", post(immediate_command(|handle| async move { handle.override_speed(SpeedOverride::FeedReset).await; })))
+        .route("/command/override/feed/plus10", post(immediate_command(|handle| async move { handle.override_speed(SpeedOverride::FeedIncrease10).await; })))
+        .route("/command/override/feed/plus1", post(immediate_command(|handle| async move { handle.override_speed(SpeedOverride::FeedIncrease1).await; })))
+        .route("/command/override/feed/minus1", post(immediate_command(|handle| async move { handle.override_speed(SpeedOverride::FeedDecrease1).await; })))
+        .route("/command/override/feed/minus10", post(immediate_command(|handle| async move { handle.override_speed(SpeedOverride::FeedDecrease10).await; })))
+
+        .route("/command/override/rapid/reset", post(immediate_command(|handle| async move { handle.override_speed(SpeedOverride::RapidReset).await; })))
+        .route("/command/override/rapid/half", post(immediate_command(|handle| async move { handle.override_speed(SpeedOverride::RapidHalf).await; })))
+        .route("/command/override/rapid/quarter", post(immediate_command(|handle| async move { handle.override_speed(SpeedOverride::RapidQuarter).await; })))
+
+        .route("/command/override/spindle/reset", post(immediate_command(|handle| async move { handle.override_speed(SpeedOverride::SpindleReset).await; })))
+        .route("/command/override/spindle/plus10", post(immediate_command(|handle| async move { handle.override_speed(SpeedOverride::SpindleIncrease10).await; })))
+        .route("/command/override/spindle/plus1", post(immediate_command(|handle| async move { handle.override_speed(SpeedOverride::SpindleIncrease1).await; })))
+        .route("/command/override/spindle/minus1", post(immediate_command(|handle| async move { handle.override_speed(SpeedOverride::SpindleDecrease1).await; })))
+        .route("/command/override/spindle/minus10", post(immediate_command(|handle| async move { handle.override_speed(SpeedOverride::SpindleDecrease10).await; })))
+
         .layer(CatchPanicLayer::new())
         .layer(cors)
         .layer(Extension(machine_arc.clone()))

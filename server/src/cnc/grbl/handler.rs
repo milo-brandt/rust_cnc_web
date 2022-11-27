@@ -27,6 +27,24 @@ pub enum WriteRequest {
     },
 }
 #[derive(Debug)]
+pub enum SpeedOverride {
+    FeedReset,
+    FeedIncrease10,
+    FeedDecrease10,
+    FeedIncrease1,
+    FeedDecrease1,
+
+    RapidReset,
+    RapidHalf,
+    RapidQuarter,
+
+    SpindleReset,
+    SpindleIncrease10,
+    SpindleDecrease10,
+    SpindleIncrease1,
+    SpindleDecrease1,
+}
+#[derive(Debug)]
 pub enum ImmediateRequest {
     Status {
         result: oneshot::Sender<GrblStateInfo>,
@@ -34,6 +52,7 @@ pub enum ImmediateRequest {
     FeedHold,
     FeedResume,
     Reset,
+    OverrideSpeed(SpeedOverride),
 }
 
 #[async_trait(?Send)]

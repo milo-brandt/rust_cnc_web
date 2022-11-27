@@ -24,9 +24,9 @@ enum GrblStatusPart {
     WorkCoordinateOffset(Array1<f64>),
     LineNumber(u64),
     Pins(String),
-    FeedOverride(f64),
-    RapidOverride(f64),
-    SpindleOverride(f64),
+    FeedOverride(u8),
+    RapidOverride(u8),
+    SpindleOverride(u8),
     AccessoryState(String),
     Unknown(String),
 }
@@ -194,6 +194,15 @@ where
     })
     .parse(input)
 }
+fn parse_u8<'a, Error: 'a + ParseError<&'a str>>(input: &'a str) -> IResult<&'a str, u8, Error>
+where
+    Error: FromExternalError<&'a str, ParseIntError>,
+{
+    map_res(take_while(|c: char| c.is_ascii_digit()), |substr: &str| {
+        substr.parse::<u8>()
+    })
+    .parse(input)
+}
 
 /*
 struct BoxedParser<I, O, E>(Box<dyn Parser<I, O, E>>);
@@ -281,12 +290,12 @@ where
                     Box::new(all.map(|pins: &str| vec![GrblStatusPart::Pins(pins.to_string())]))
                 }
                 "Ov" => Box::new(
-                    tuple((parse_f64, tag(","), parse_f64, tag(","), parse_f64)).map(
+                    tuple((parse_u8, tag(","), parse_u8, tag(","), parse_u8)).map(
                         |(feed, _, rapids, _, spindle)| {
                             vec![
-                                GrblStatusPart::FeedOverride(feed * 0.01),
-                                GrblStatusPart::RapidOverride(rapids * 0.01),
-                                GrblStatusPart::SpindleOverride(spindle * 0.01),
+                                GrblStatusPart::FeedOverride(feed),
+                                GrblStatusPart::RapidOverride(rapids),
+                                GrblStatusPart::SpindleOverride(spindle),
                             ]
                         },
                     ),
@@ -520,9 +529,9 @@ mod tests {
         status.current_spindle = Some(500.0);
         status.planner = Some(15);
         status.rx_bytes = Some(128);
-        status.feed_override = Some(0.25);
-        status.rapid_override = Some(0.5);
-        status.spindle_override = Some(2.0);
+        status.feed_override = Some(25);
+        status.rapid_override = Some(50);
+        status.spindle_override = Some(200);
         status.accessory_state = Some("SM".to_string());
         status.unknown_terms.push("Unknown".to_string());
         assert_eq!(result, Ok(("", status)));

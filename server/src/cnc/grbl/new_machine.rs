@@ -5,6 +5,7 @@ use chrono::Local;
 use futures::{Future};
 use tokio::join;
 use tokio::io::{AsyncBufRead, Lines};
+use crate::cnc::grbl::messages::GrblResidualStatus;
 use crate::cnc::machine_writer::MachineWriter;
 use {
     super::{
@@ -25,7 +26,7 @@ use {
         time::{sleep, Sleep},
     },
 };
-use super::handler::Handler;
+use super::handler::{Handler, SpeedOverride};
 pub use super::handler::{LineError, ProbeError, WriteRequest, ImmediateRequest};
 
 struct MachineThread<'a, Write: MachineWriter, H: Handler> {
@@ -34,7 +35,7 @@ struct MachineThread<'a, Write: MachineWriter, H: Handler> {
     waiting_ok: VecDeque<oneshot::Sender<Result<(), LineError>>>,
     waiting_probe: VecDeque<oneshot::Sender<Result<ProbeEvent, ProbeError>>>,
     waiting_status: VecDeque<oneshot::Sender<GrblStateInfo>>,
-    work_coordinate_offset: Option<Array1<f64>>,
+    residual_status: GrblResidualStatus,
 }
 impl<'a, Write: MachineWriter, H: Handler> MachineThread<'a, Write, H> {
     fn log_send(&mut self, bytes: Vec<u8>) {
@@ -58,19 +59,7 @@ impl<'a, Write: MachineWriter, H: Handler> MachineThread<'a, Write, H> {
                 }
             }
             GrblMessage::StatusEvent(status_event) => {
-                if let Some(wco) = status_event.work_coordinate_offset {
-                    self.work_coordinate_offset = Some(wco);
-                }
-                // self.work_coordinate_offset must be set according to protocol!
-                let machine_position = match status_event.machine_position {
-                    GrblPosition::Machine(pos) => pos,
-                    GrblPosition::Work(pos) => pos + self.work_coordinate_offset.as_ref().unwrap(),
-                };
-                let state = GrblStateInfo {
-                    state: status_event.state,
-                    machine_position,
-                    work_coordinate_offset: self.work_coordinate_offset.as_ref().unwrap().clone(),
-                };
+                let state = status_event.to_state_with_residual(&mut self.residual_status);
                 for waiting in self.waiting_status.drain(..) {
                     drop(waiting.send(state.clone())); // Don't worry about if it actually sent;
                 }
@@ -144,6 +133,24 @@ impl<'a, Write: MachineWriter, H: Handler> MachineThread<'a, Write, H> {
             ImmediateRequest::Reset => {
                 self.send_immediate(vec![0x18]).await;
             },
+            ImmediateRequest::OverrideSpeed(change) => {
+                let byte = match change {
+                    SpeedOverride::FeedReset => 0x90,
+                    SpeedOverride::FeedIncrease10 => 0x91,
+                    SpeedOverride::FeedDecrease10 => 0x92,
+                    SpeedOverride::FeedIncrease1 => 0x93,
+                    SpeedOverride::FeedDecrease1 => 0x94,
+                    SpeedOverride::RapidReset => 0x95,
+                    SpeedOverride::RapidHalf => 0x96,
+                    SpeedOverride::RapidQuarter => 0x97,
+                    SpeedOverride::SpindleReset => 0x99,
+                    SpeedOverride::SpindleIncrease10 => 0x9A,
+                    SpeedOverride::SpindleDecrease10 => 0x9B,
+                    SpeedOverride::SpindleIncrease1 => 0x9C,
+                    SpeedOverride::SpindleDecrease1 => 0x9D,
+                };
+                self.send_immediate(vec![byte]).await;
+            }
         }
     }
     async fn reset(&mut self) {
@@ -189,13 +196,14 @@ where
         waiting_ok: Default::default(),
         waiting_probe: Default::default(),
         waiting_status: Default::default(),
-        work_coordinate_offset: None,
+        residual_status: GrblResidualStatus::new(),
     };
     join!(
         async {
             // Main loop for the machine
             'outer: loop {
                 machine_thread.wait_for_greeting(&mut lines_reader).await.unwrap();
+                // TODO: On first loop, make sure we get a work_coordinate_offset
                 machine_thread.reset().await;  // Reset here: we now know that no more messages from the prior world will arrive.
                 loop {
                     select! {

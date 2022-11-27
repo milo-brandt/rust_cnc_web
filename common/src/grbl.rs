@@ -18,6 +18,9 @@ pub struct GrblFullInfo {
     pub state: GrblState,
     pub machine_position: Vec<f64>,
     pub work_coordinate_offset: Vec<f64>,
+    pub feed_override: u8,
+    pub spindle_override: u8,
+    pub rapid_override: u8,
 }
 impl GrblFullInfo {
     pub fn work_position(&self) -> Vec<f64> {

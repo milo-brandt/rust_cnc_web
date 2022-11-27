@@ -115,6 +115,9 @@ impl ImmediateHandle {
     pub async fn stop(&self) {
         self.sender.send(ImmediateMessage::Stop).await.unwrap()
     }
+    pub async fn reset(&self) {
+        self.sender.send(ImmediateMessage::Reset).await.unwrap()
+    }
     pub async fn get_job_handle(&self) -> Option<JobHandle> {
         let (tx, rx) = oneshot::channel();
         self.sender.send(ImmediateMessage::InitiateJob(tx)).await.unwrap();

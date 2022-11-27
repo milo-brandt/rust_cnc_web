@@ -106,6 +106,12 @@ pub fn StatusHeader(cx: Scope) -> View<DomNode> {
             log::debug!("Result: {:?}", result);
         })
     });
+    let stop = create_ref(cx, || {
+        spawn_local(async{
+            let result = Request::post("http://cnc:3000/command/stop").send().await;
+            log::debug!("Result: {:?}", result);
+        })
+    });
     let reset = create_ref(cx, || {
         spawn_local(async{
             let result = Request::post("http://cnc:3000/command/reset").send().await;
@@ -191,8 +197,9 @@ pub fn StatusHeader(cx: Scope) -> View<DomNode> {
             div {
                 IconButton(icon_name=button_kind, on_click=on_click, disabled=button_disabled)
                 IconButton(icon_name=create_signal(cx, "lock_open".to_string()), on_click=unlock, disabled=unlock_disabled)
-                IconButton(icon_name=create_signal(cx, "restart_alt".to_string()), on_click=reset)
+                IconButton(icon_name=create_signal(cx, "restart_alt".to_string()), on_click=stop)
                 IconButton(icon_name=create_signal(cx, "home".to_string()), on_click=home, disabled=home_disabled)
+                IconButton(icon_name=create_signal(cx, "cancel".to_string()), on_click=reset)
             }
         }
     }

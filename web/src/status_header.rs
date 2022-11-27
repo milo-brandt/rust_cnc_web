@@ -139,7 +139,7 @@ pub fn OverrideController(cx: Scope) -> View<DomNode> {
     view! { cx, 
         div(class=css_style.get_class_name()) {
             PercentOverrideController(url_slug="feed".into(), heading="Feed override:".into(), getter=|v| v.feed_override.to_string())
-            PercentOverrideController(url_slug="spindle".into(), heading="Spindle override:".into(), getter=|v| v.spindle_override.to_string())
+            // PercentOverrideController(url_slug="spindle".into(), heading="Spindle override:".into(), getter=|v| v.spindle_override.to_string())
         }
     }
 }

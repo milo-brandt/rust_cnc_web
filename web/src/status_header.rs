@@ -15,7 +15,7 @@ use web_sys::{KeyboardEvent, Event};
 use gloo_timers::future::sleep;
 use std::time::Duration;
 use sycamore::futures::spawn_local_scoped;
-use common::grbl::GrblState;
+use common::grbl::{GrblState, GrblFullInfo};
 
 use crate::mdc::IconButton;
 
@@ -71,8 +71,26 @@ pub fn global_info<'a>(cx: Scope<'a>) -> &'a GlobalInfo<'a> {
 }
 
 
+#[derive(Prop)]
+pub struct PercentOverrideControllerProps<F: Fn(&GrblFullInfo) -> String> {
+    url_slug: String,
+    heading: String,
+    getter: F,
+}
+
 #[component]
-pub fn OverrideController(cx: Scope) -> View<DomNode> {
+pub fn PercentOverrideController<'a, F: Fn(&GrblFullInfo) -> String + 'a>(cx: Scope<'a>, props: PercentOverrideControllerProps<F>) -> View<DomNode> {
+    let css_style = style! { r#"
+        display: flex;
+        align-items: center;
+        .current_value {
+            display: flex;
+            justify-content: center;
+            width: 2em;
+        }
+    "#
+    }.expect("CSS should work");
+
     let global_info: &GlobalInfo = use_context(cx);
     let callback_for_url = move |url: String| {
         create_ref(cx, move || {
@@ -83,28 +101,24 @@ pub fn OverrideController(cx: Scope) -> View<DomNode> {
             })    
         })
     };
-    let feed_reset = callback_for_url("http://cnc:3000/command/override/feed/reset".into());
-    let feed_increase_10 = callback_for_url("http://cnc:3000/command/override/feed/plus10".into());
-    let feed_increase_1 = callback_for_url("http://cnc:3000/command/override/feed/plus1".into());
-    let feed_decrease_1 = callback_for_url("http://cnc:3000/command/override/feed/minus1".into());
-    let feed_decrease_10 = callback_for_url("http://cnc:3000/command/override/feed/minus10".into());
-
-    let status = create_selector(cx, move || {
-        //let value = &*global_info.grbl_info.get();
-        //let x: Option<&common::grbl::GrblFullInfo> = value.as_ref();
-        //x.map_or("???".to_string(), |v| format!("{}", v.feed_override))
-        "Hello".to_string()
-    });
+    let feed_reset = callback_for_url(format!("http://cnc:3000/command/override/{}/reset", props.url_slug));
+    let feed_increase_10 = callback_for_url(format!("http://cnc:3000/command/override/{}/plus10", props.url_slug));
+    let feed_increase_1 = callback_for_url(format!("http://cnc:3000/command/override/{}/plus1", props.url_slug));
+    let feed_decrease_1 = callback_for_url(format!("http://cnc:3000/command/override/{}/minus1", props.url_slug));
+    let feed_decrease_10 = callback_for_url(format!("http://cnc:3000/command/override/{}/minus10", props.url_slug));
 
     view! { cx,
-        div {
+        div(class=css_style.get_class_name()) {
+            (props.heading)
             IconButton(icon_name=create_signal(cx, "keyboard_double_arrow_down".into()), on_click=feed_decrease_10)
             IconButton(icon_name=create_signal(cx, "keyboard_arrow_down".into()), on_click=feed_decrease_1)
-            ({
-                let value = &*global_info.grbl_info.get();
-                let x: Option<&common::grbl::GrblFullInfo> = value.as_ref();
-                x.map_or("???".to_string(), |v| v.feed_override.to_string())
-            })
+            div(class="current_value") {
+                ({
+                    let value = &*global_info.grbl_info.get();
+                    let x: Option<&common::grbl::GrblFullInfo> = value.as_ref();
+                    x.map_or("???".to_string(), |v| (props.getter)(v))
+                })
+            }
             IconButton(icon_name=create_signal(cx, "restart_alt".into()), on_click=feed_reset)
             IconButton(icon_name=create_signal(cx, "keyboard_arrow_up".into()), on_click=feed_increase_1)
             IconButton(icon_name=create_signal(cx, "keyboard_double_arrow_up".into()), on_click=feed_increase_10)
@@ -113,15 +127,29 @@ pub fn OverrideController(cx: Scope) -> View<DomNode> {
     }
 }
 
+
 #[component]
-pub fn StatusHeader(cx: Scope) -> View<DomNode> {
+pub fn OverrideController(cx: Scope) -> View<DomNode> {
     let css_style = style! { r#"
         display: flex;
         flex-direction: column;
-        height: 15vh;
-        width: 100vw;
+        align-items: flex-end;
+    "#
+    }.expect("CSS should work");
+    view! { cx, 
+        div(class=css_style.get_class_name()) {
+            PercentOverrideController(url_slug="feed".into(), heading="Feed override:".into(), getter=|v| v.feed_override.to_string())
+            PercentOverrideController(url_slug="spindle".into(), heading="Spindle override:".into(), getter=|v| v.spindle_override.to_string())
+        }
+    }
+}
+
+#[component]
+pub fn LeftStatusHeader(cx: Scope) -> View<DomNode> {
+    let css_style = style! { r#"
+        display: flex;
+        flex-direction: column;
         align-items: stretch;
-        background-color: gray;
         div button {
             border: none;
             background: none;
@@ -242,8 +270,28 @@ pub fn StatusHeader(cx: Scope) -> View<DomNode> {
                 IconButton(icon_name=create_signal(cx, "restart_alt".to_string()), on_click=stop)
                 IconButton(icon_name=create_signal(cx, "home".to_string()), on_click=home, disabled=home_disabled)
                 IconButton(icon_name=create_signal(cx, "cancel".to_string()), on_click=reset)
-            } br {}
-            OverrideController
+            }
+        }
+    }
+}
+
+#[component]
+pub fn StatusHeader(cx: Scope) -> View<DomNode> {
+    let css_style = style! { r#"
+        display: flex;
+        justify-content: space-between;
+        width: 100vw;
+        background-color: gray;
+        "#
+    }.expect("CSS should work");
+    view! { cx, 
+        div(class=css_style.get_class_name()) {
+            div {
+                LeftStatusHeader
+            }
+            div {
+                OverrideController
+            }
         }
     }
 }

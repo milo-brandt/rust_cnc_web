@@ -2,6 +2,8 @@ use std::pin::Pin;
 
 use futures::{Stream, StreamExt, pin_mut, Future, FutureExt};
 
+use crate::cnc::gcode::{GCodeLine, GCodeCommand};
+
 use super::{gcode::parser::GeneralizedLineOwned, grbl::standard_handler::{JobHandle, JobFail}};
 
 pub fn sized_stream_to_job<S>(stream: S, total_lines: usize) -> impl FnOnce(JobHandle) -> Pin<Box<dyn Future<Output=()> + Send + 'static>> + Send + 'static
@@ -24,9 +26,16 @@ where
                         GeneralizedLineOwned::Empty => {},
                     }
                 }
-                None => break
+                None => {
+                    // Send a dwell to synchronize at end.
+                    job_handle.set_status(format!("All lines sent. Waiting for machine to finish.")).await?;
+                    drop(job_handle.send_gcode(GCodeLine {
+                        modals: Vec::new(),
+                        command: Some(GCodeCommand::Dwell { duration: 0.01 }),
+                    }).await?.await);
+                    return Ok(())
+                }
             }
         }
-        Ok(())
-    }.map(|output: Result<(), JobFail>| ()))  // catch and ignore the error!
+    }.map(|_: Result<(), JobFail>| ()))  // catch and ignore the error!
 }

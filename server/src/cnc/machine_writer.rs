@@ -13,7 +13,8 @@ commands can be pending at once. Also provides a way for immediate commands to p
 #[async_trait]
 pub trait MachineWriter {
     async fn write_immediate(&mut self, bytes: Vec<u8>) -> Result<Vec<u8>, std::io::Error>;
-    fn clear_waiting(&mut self);
+    fn clear_unsent(&mut self);  // Clear unsent lines
+    fn clear_waiting(&mut self);  // Clear unsent lines + any memory of sent ones
     fn can_enqueue_line(&mut self) -> bool;
     async fn enqueue_line(&mut self, bytes: Vec<u8>) -> Result<Option<Vec<u8>>, std::io::Error>;
     async fn pop_received_line(&mut self) -> Result<Option<Vec<u8>>, std::io::Error>;
@@ -36,6 +37,9 @@ impl<Write: AsyncWrite + Unpin + Send> MachineWriter for BufferCountingWriter<Wr
         // Write immediately with no checks. Should be used externally only for immediate commands.
         self.write.write_all(&bytes).await?;
         Ok(bytes)
+    }
+    fn clear_unsent(&mut self) {
+        self.next_line = None;
     }
     fn clear_waiting(&mut self) {
         // Clear any pending writes and forget them.
@@ -61,7 +65,14 @@ impl<Write: AsyncWrite + Unpin + Send> MachineWriter for BufferCountingWriter<Wr
     async fn pop_received_line(&mut self) -> Result<Option<Vec<u8>>, std::io::Error> {
         // Signal that a line has been processed and its buffer space free for writing.
         // Should be called only after at least as many calls to enqueue_line; may panic otherwise.
-        let received_length = self.waiting_lines.pop().unwrap();
+        let last_length = self.waiting_lines.pop();
+        let received_length = match last_length {
+            Some(length) => length,
+            None => {
+                println!("Unexpected line popped! This should never happen!");
+                return Ok(None)
+            }
+        };
         self.waiting_size -= received_length;
         if let Some(next_line) = &self.next_line {
             let length = next_line.len() as u16;

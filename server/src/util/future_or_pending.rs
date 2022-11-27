@@ -11,6 +11,12 @@ impl<F: Future> FutureOrPending<F> {
     pub fn new(future: Option<F>) -> Self {
         FutureOrPending{ future }
     }
+    pub fn is_none(&self) -> bool {
+        self.future.is_none()
+    }
+    pub fn is_some(&self) -> bool {
+        self.future.is_some()
+    }
 }
 impl<F: Future> Future for FutureOrPending<F> {
     type Output = F::Output;
@@ -23,7 +29,9 @@ impl<F: Future> Future for FutureOrPending<F> {
                     Pin::new_unchecked(future)
                 };
                 let result = future.poll(cx);
-                *projection.future = None;
+                if result.is_ready() {
+                    *projection.future = None;
+                }
                 result
             }
             None => Poll::Pending

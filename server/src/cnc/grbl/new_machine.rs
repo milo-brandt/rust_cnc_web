@@ -206,9 +206,10 @@ where
                             }
                         },
                         immediate_request = machine_thread.handler.next_immediate_request() => {
-                            let must_reset = if let ImmediateRequest::Reset = immediate_request { true } else { false };
+                            let is_reset = if let ImmediateRequest::Reset = immediate_request { true } else { false };
                             machine_thread.immediate_send(immediate_request).await;
-                            if must_reset {
+                            if is_reset {
+                                machine_thread.writer.clear_unsent();  // Not necessary right now - will be fully reset before anything is popped; just for safety against future changes.
                                 continue 'outer  //Expect another greeting.
                             }
                         },

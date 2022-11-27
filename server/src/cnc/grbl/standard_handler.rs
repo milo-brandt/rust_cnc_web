@@ -3,15 +3,16 @@
 */
 
 use core::ascii;
-use std::{sync::Arc, future::IntoFuture, cell::RefCell, pin::Pin};
+use std::{sync::Arc, future::IntoFuture, cell::{RefCell, Cell}, pin::Pin, time::{Duration, Instant}};
 
 use crate::{cnc::{gcode::{GCodeLine, GCodeFormatSpecification}}, util::{local_generation_counter::LocalGenerationCounter, fixed_rb::{FixedRb}, history_broadcast, format_bytes::format_byte_string, future_or_pending::FutureOrPending}};
 
 use super::{handler::Handler, new_machine::{LineError, WriteRequest, ProbeError, ImmediateRequest}, messages::{ProbeEvent, GrblStateInfo}};
 use async_trait::async_trait;
 use chrono::{DateTime, Local};
-use futures::{Future, io::Write, FutureExt, future::OptionFuture};
-use tokio::{sync::{mpsc, oneshot, watch}, select, spawn, runtime::Handle};
+use common::grbl::GrblState;
+use futures::{Future, io::Write, FutureExt, future::OptionFuture, pin_mut};
+use tokio::{sync::{mpsc, oneshot, watch}, select, spawn, runtime::Handle, time::{sleep, timeout}};
 
 #[derive(Debug)]
 pub enum Message {
@@ -205,6 +206,78 @@ impl StandardHandler {
         private.job_receiver = None;
     }
 
+    async fn send_immediate_request(&self, mut request: ImmediateRequest) {
+        loop {
+            let result = self.mutate_and_advance(move |inner|
+                inner.waiting_immediate.push(request)
+            );
+            match result {
+                Ok(()) => return,
+                Err(r) => request = r
+            }
+            (&self.generation_counter).await;
+        }
+    }
+    async fn get_status(&self) -> Result<GrblStateInfo, oneshot::error::RecvError> {
+        let (tx, rx) = oneshot::channel();
+        self.send_immediate_request(ImmediateRequest::Status { result: tx }).await;
+        rx.await
+    }
+    async fn graceful_halt(&self) {
+        // Should be called only after a feed hold command has been issued!
+        const TIME_TO_CONFIM_HALTING: Duration = Duration::from_millis(50);
+        const TIME_TO_HALT: Duration = Duration::from_millis(600);
+
+        // Shared state; used to check that the microcontroller has changed its state to the
+        // halting for hold state. If not, we just send the reset anyways after TIME_TO_CONFIRM_HALTING.
+        let has_confirmed_halting = Cell::new(false);
+        // Future that gives us a chance to hold...
+        let has_held = async {
+            // Poll once and ignore to be sure to get past any batching of immediate commands
+            let status = self.get_status().await;
+            let status = match status {
+                Ok(status) => status,
+                Err(_) => return, // exit early, causing reset to be sent.
+            };
+            if status.state == GrblState::Hold(1) {
+                has_confirmed_halting.set(true);
+            }
+            // Now, while Hold(1) is the state, loop to give the machine time to stop.
+            // Typically takes ~8-9 ms per loop with FluidNC.
+            loop {
+                let status = self.get_status().await;
+                match status {
+                    Ok(state_info) => {
+                        match state_info.state {
+                            GrblState::Hold(1) => {
+                                has_confirmed_halting.set(true);
+                            },
+                            _ => return
+                        }
+                    }
+                    _ => return
+                }
+            }
+        };
+        pin_mut!(has_held);
+        let final_deadline = sleep(TIME_TO_HALT);
+        // For an initial period, check that the message was actually received; if we're doing something like
+        // homing, we won't get confirmation and should 
+        let wait_for_halt = select! {
+            biased;
+            _ = &mut has_held => false,
+            _ = sleep(TIME_TO_CONFIM_HALTING) => has_confirmed_halting.get(),
+        };
+        // If allowed, we continue waiting either until the hard timeout or until has_held finishes.
+        if wait_for_halt {
+            select! {
+                biased;
+                _ = has_held => (),
+                _ = final_deadline => (),
+            }
+        }
+        self.send_immediate_request(ImmediateRequest::Reset).await;
+    }
 }
 
 #[async_trait(?Send)]
@@ -233,6 +306,8 @@ impl Handler for StandardHandler {
     async fn run(&self) {
         let mut private = self.private_state.borrow_mut();
         let private = &mut *private;
+        let halt_future = FutureOrPending::new(None);
+        pin_mut!(halt_future);
         loop {
             select! {
                 biased;
@@ -253,9 +328,11 @@ impl Handler for StandardHandler {
                             );
                         }
                         Some(ImmediateMessage::Resume) => {
-                            self.mutate_and_advance(|inner|
-                                inner.waiting_immediate.push(ImmediateRequest::FeedResume).unwrap()
-                            );
+                            if halt_future.is_none() {  // Disallow resumption if we're trying to halt.
+                                self.mutate_and_advance(|inner|
+                                    inner.waiting_immediate.push(ImmediateRequest::FeedResume).unwrap()
+                                );
+                            }
                         }
                         Some(ImmediateMessage::Stop) => {
                             self.stop_job(private);
@@ -263,16 +340,18 @@ impl Handler for StandardHandler {
                             self.mutate_and_advance(|inner|
                                 inner.waiting_immediate.push(ImmediateRequest::FeedHold).unwrap()
                             );
+                            halt_future.set(Some(self.graceful_halt()).into());
                         }
                         Some(ImmediateMessage::Reset) => {
                             // Remove the current job!
                             self.stop_job(private);
+                            halt_future.set(None.into());
                             self.mutate_and_advance(|inner|
                                 inner.waiting_immediate.push(ImmediateRequest::Reset).unwrap()
                             );
                         }
                         Some(ImmediateMessage::InitiateJob(tx)) => {
-                            if private.job_receiver.is_some() {
+                            if private.job_receiver.is_some() || halt_future.is_some() {
                                 drop(tx.send(None))
                             } else {
                                 let (job_tx, job_rx) = mpsc::channel(16);
@@ -309,7 +388,8 @@ impl Handler for StandardHandler {
                             private.job_receiver = None;  // job hung up - must be done
                         }
                     }
-                }
+                },
+                _ = &mut halt_future => continue,
                 _ = self.generation_counter.into_future() => continue  // If we get a signal to go on...
             }
         }

@@ -151,7 +151,7 @@ pub fn DebugPage(cx: Scope) -> View<DomNode> {
         }
     };
     let list = create_memo(cx, || if *is_checked.get() {
-        message_list_inner.get().iter().filter(|x| !x.starts_with("< <") && !x.starts_with("> ?")).map(String::from).collect()
+        message_list_inner.get().iter().filter(|x| !x.ends_with(">") && !x.contains('?')).map(String::from).collect()
     } else {
         (*message_list_inner.get()).clone()
     });

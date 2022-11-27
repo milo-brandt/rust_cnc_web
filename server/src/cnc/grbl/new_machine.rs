@@ -210,6 +210,7 @@ where
                             machine_thread.immediate_send(immediate_request).await;
                             if is_reset {
                                 machine_thread.writer.clear_unsent();  // Not necessary right now - will be fully reset before anything is popped; just for safety against future changes.
+                                machine_thread.writer.flush().await.unwrap();  // Not strictly needed - but may as well get to a known state.
                                 continue 'outer  //Expect another greeting.
                             }
                         },

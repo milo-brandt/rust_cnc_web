@@ -16,6 +16,7 @@ pub trait MachineWriter {
     fn clear_unsent(&mut self);  // Clear unsent lines
     fn clear_waiting(&mut self);  // Clear unsent lines + any memory of sent ones
     fn can_enqueue_line(&mut self) -> bool;
+    async fn flush(&mut self) -> Result<(), std::io::Error>;
     async fn enqueue_line(&mut self, bytes: Vec<u8>) -> Result<Option<Vec<u8>>, std::io::Error>;
     async fn pop_received_line(&mut self) -> Result<Option<Vec<u8>>, std::io::Error>;
 }
@@ -50,6 +51,9 @@ impl<Write: AsyncWrite + Unpin + Send> MachineWriter for BufferCountingWriter<Wr
     fn can_enqueue_line(&mut self) -> bool {
         // Precondition for enqueue_line.
         self.next_line.is_none()
+    }
+    async fn flush(&mut self) -> Result<(), std::io::Error> {
+        self.write.flush().await
     }
     async fn enqueue_line(&mut self, bytes: Vec<u8>) -> Result<Option<Vec<u8>>, std::io::Error> {
         // Write a line if we can

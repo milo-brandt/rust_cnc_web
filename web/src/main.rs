@@ -4,6 +4,7 @@ mod debug_page;
 mod status_header;
 mod gcode_job_page;
 mod jog_page;
+mod request;
 
 use jog_page::JogPage;
 use status_header::GlobalInfo;

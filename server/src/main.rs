@@ -17,6 +17,7 @@ use oneway_websocket::send_stream;
 use tokio::runtime::{Runtime, Builder};
 use tower_http::catch_panic::CatchPanicLayer;
 use util::{history_broadcast, format_bytes::format_byte_string};
+use common::api;
 
 use crate::cnc::grbl::handler::SpeedOverride;
 use {
@@ -154,34 +155,36 @@ async fn run_server(machine: ImmediateHandle, debug_rx: history_broadcast::Recei
 
     let machine_arc= Arc::new(machine);
     let app = Router::new()
-        .route("/job/run_file", post(run_gcode_file))
-        .route("/debug/send", post(run_gcode_unchecked))
-        .route("/debug/listen_raw", get(listen_raw))
-        .route("/debug/listen_status", get(listen_status))
-        .route("/debug/listen_position", get(listen_position))
-        .route("/job/upload_file", post(upload))
-        .route("/job/delete_file", delete(delete_file))
-        .route("/list_files", get(get_gcode_list))
-        .route("/command/feed_hold", post(immediate_command(|handle| async move { handle.pause().await; })))
-        .route("/command/feed_resume", post(immediate_command(|handle| async move { handle.resume().await; })))
-        .route("/command/stop", post(immediate_command(|handle| async move { handle.stop().await; })))
-        .route("/command/reset", post(immediate_command(|handle| async move { handle.reset().await; })))
+        .route(api::RUN_GCODE_FILE, post(run_gcode_file))
+        .route(api::UPLOAD_GCODE_FILE, post(upload))
+        .route(api::DELETE_GCODE_FILE, delete(delete_file))
+        .route(api::LIST_GCODE_FILES, get(get_gcode_list))
+        
+        .route(api::SEND_RAW_GCODE, post(run_gcode_unchecked))
+        .route(api::LISTEN_TO_RAW_MACHINE, get(listen_raw))
+        .route(api::LISTEN_TO_JOB_STATUS, get(listen_status))
+        .route(api::LISTEN_TO_MACHINE_STATUS, get(listen_position))
+        
+        .route(api::COMMAND_PAUSE, post(immediate_command(|handle| async move { handle.pause().await; })))
+        .route(api::COMMAND_RESUME, post(immediate_command(|handle| async move { handle.resume().await; })))
+        .route(api::COMMAND_STOP, post(immediate_command(|handle| async move { handle.stop().await; })))
+        .route(api::COMMAND_RESET, post(immediate_command(|handle| async move { handle.reset().await; })))
 
-        .route("/command/override/feed/reset", post(immediate_command(|handle| async move { handle.override_speed(SpeedOverride::FeedReset).await; })))
-        .route("/command/override/feed/plus10", post(immediate_command(|handle| async move { handle.override_speed(SpeedOverride::FeedIncrease10).await; })))
-        .route("/command/override/feed/plus1", post(immediate_command(|handle| async move { handle.override_speed(SpeedOverride::FeedIncrease1).await; })))
-        .route("/command/override/feed/minus1", post(immediate_command(|handle| async move { handle.override_speed(SpeedOverride::FeedDecrease1).await; })))
-        .route("/command/override/feed/minus10", post(immediate_command(|handle| async move { handle.override_speed(SpeedOverride::FeedDecrease10).await; })))
+        .route(api::FEED_OVERRIDE.reset, post(immediate_command(|handle| async move { handle.override_speed(SpeedOverride::FeedReset).await; })))
+        .route(api::FEED_OVERRIDE.plus_10, post(immediate_command(|handle| async move { handle.override_speed(SpeedOverride::FeedIncrease10).await; })))
+        .route(api::FEED_OVERRIDE.plus_1, post(immediate_command(|handle| async move { handle.override_speed(SpeedOverride::FeedIncrease1).await; })))
+        .route(api::FEED_OVERRIDE.minus_1, post(immediate_command(|handle| async move { handle.override_speed(SpeedOverride::FeedDecrease1).await; })))
+        .route(api::FEED_OVERRIDE.minus_10, post(immediate_command(|handle| async move { handle.override_speed(SpeedOverride::FeedDecrease10).await; })))
 
-        .route("/command/override/rapid/reset", post(immediate_command(|handle| async move { handle.override_speed(SpeedOverride::RapidReset).await; })))
-        .route("/command/override/rapid/half", post(immediate_command(|handle| async move { handle.override_speed(SpeedOverride::RapidHalf).await; })))
-        .route("/command/override/rapid/quarter", post(immediate_command(|handle| async move { handle.override_speed(SpeedOverride::RapidQuarter).await; })))
-
-        .route("/command/override/spindle/reset", post(immediate_command(|handle| async move { handle.override_speed(SpeedOverride::SpindleReset).await; })))
-        .route("/command/override/spindle/plus10", post(immediate_command(|handle| async move { handle.override_speed(SpeedOverride::SpindleIncrease10).await; })))
-        .route("/command/override/spindle/plus1", post(immediate_command(|handle| async move { handle.override_speed(SpeedOverride::SpindleIncrease1).await; })))
-        .route("/command/override/spindle/minus1", post(immediate_command(|handle| async move { handle.override_speed(SpeedOverride::SpindleDecrease1).await; })))
-        .route("/command/override/spindle/minus10", post(immediate_command(|handle| async move { handle.override_speed(SpeedOverride::SpindleDecrease10).await; })))
+        .route(api::SPINDLE_OVERRIDE.reset, post(immediate_command(|handle| async move { handle.override_speed(SpeedOverride::SpindleReset).await; })))
+        .route(api::SPINDLE_OVERRIDE.plus_10, post(immediate_command(|handle| async move { handle.override_speed(SpeedOverride::SpindleIncrease10).await; })))
+        .route(api::SPINDLE_OVERRIDE.plus_1, post(immediate_command(|handle| async move { handle.override_speed(SpeedOverride::SpindleIncrease1).await; })))
+        .route(api::SPINDLE_OVERRIDE.minus_1, post(immediate_command(|handle| async move { handle.override_speed(SpeedOverride::SpindleDecrease1).await; })))
+        .route(api::SPINDLE_OVERRIDE.minus_10, post(immediate_command(|handle| async move { handle.override_speed(SpeedOverride::SpindleDecrease10).await; })))
+     
+        .route(api::RAPID_OVERRIDE.reset, post(immediate_command(|handle| async move { handle.override_speed(SpeedOverride::RapidReset).await; })))
+        .route(api::RAPID_OVERRIDE.half, post(immediate_command(|handle| async move { handle.override_speed(SpeedOverride::RapidHalf).await; })))
+        .route(api::RAPID_OVERRIDE.quarter, post(immediate_command(|handle| async move { handle.override_speed(SpeedOverride::RapidQuarter).await; })))
 
         .layer(CatchPanicLayer::new())
         .layer(cors)
@@ -266,48 +269,6 @@ fn default_settings() -> GCodeFormatSpecification {
         float_digits: 3,
     }
 }
-/*async fn run_gcode(
-    message: RawBody,
-    machine: Extension<Arc<ImmediateHandle>>,
-) -> String {
-    let body_bytes = hyper::body::to_bytes(message.0).await.unwrap();
-    let body = std::str::from_utf8(&body_bytes).unwrap();
-    let spec = default_settings();
-    let lines: Result<Vec<GeneralizedLineOwned>, (usize, GCodeParseError)> = body
-        .lines()
-        .enumerate()
-        .map(|(index, line)| {
-            parse_generalized_line(&spec, line)
-                .map(GeneralizedLine::into_owned)
-                .map_err(|e| (index, e))
-        })
-        .collect();
-    let lines = match lines {
-        Ok(lines) => lines,
-        Err((error_index, error)) => {
-            return format!("Error on line {} of input!\n{:?}\n", error_index + 1, error)
-        }
-    };
-    let total_lines = lines.len();
-    let result = broker.try_send_job(
-        StreamJob::new(
-            stream! {
-                for line in lines.into_iter() {
-                    yield line;
-                }
-            },
-            total_lines,
-        ),
-        MachineHandle {
-            write_stream: machine.write_stream.clone(),
-            immediate_write_stream: machine.immediate_write_stream.clone(),
-        },
-    );
-    match result {
-        Ok(()) => "Job sent!".to_string(),
-        Err(_) => "Job not sent!".to_string(),
-    }
-}*/
 async fn run_gcode_unchecked(
     // Runs the line *if* no job is scheduled yet.
     message: RawBody,
@@ -326,12 +287,8 @@ async fn run_gcode_unchecked(
     }
 }
 
-#[derive(Deserialize)]
-struct RunGcodeFile {
-    path: String,
-}
 async fn run_gcode_file(
-    message: Json<RunGcodeFile>,
+    message: Json<api::RunGcodeFile>,
     machine: Extension<Arc<ImmediateHandle>>,
 ) -> String {
     if !message.path.chars().all(|c|
@@ -460,12 +417,8 @@ async fn upload(multipart: ContentLengthLimit<Multipart, 134217728>) -> String {
     }
     "File not given!".to_string()
 }
-#[derive(Deserialize)]
-struct DeleteGcodeFile {
-    path: String,
-}
 
-async fn delete_file(info: Json<DeleteGcodeFile>) -> String {
+async fn delete_file(info: Json<api::DeleteGcodeFile>) -> String {
     //TODO: Scope where we can delete :)
     remove_file(format!("gcode/{}", info.path)).await.unwrap();
     "Ok".to_string()

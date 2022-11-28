@@ -2,6 +2,7 @@ use std::io::Read;
 use std::mem::forget;
 use std::sync::Arc;
 
+use common::api::{self, RunGcodeFile, DeleteGcodeFile};
 use futures::future::{Fuse, FusedFuture};
 use reqwasm::websocket::{futures::WebSocket, Message};
 use reqwasm::http::{FormData, Request};
@@ -17,6 +18,7 @@ use web_sys::{KeyboardEvent, Event, HtmlInputElement};
 use gloo_timers::future::sleep;
 use std::time::Duration;
 use sycamore::futures::{create_resource, spawn_local_scoped};
+use crate::request::{self, HttpMethod};
 use crate::status_header::GlobalInfo;
 use crate::utils::async_sycamore;
 
@@ -32,28 +34,20 @@ pub struct GcodeFileProps<'a, F: Fn() -> ()> {
 pub fn GcodeFile<'a, F: Fn() -> () + 'a>(cx: Scope<'a>, props: GcodeFileProps<'a, F>) -> View<DomNode> {
     let name = create_ref(cx, props.name);
     let run_callback = create_ref(cx, |_| {
-        let name = name.clone();
-        spawn_local(async move {
-            log::debug!("Sending job!");
-            let result = Request::post("http://cnc:3000/job/run_file")
-            .body(format!("{{\"path\":\"{}\"}}", name))
-            .header("Content-Type", "application/json")
-            .send()
-            .await;
-            log::debug!("Result: {:?}", result);
-        });
+        request::request_detached_with_json(
+            HttpMethod::Post,
+            api::RUN_GCODE_FILE,
+            &RunGcodeFile { path: name.clone() }
+        );
     });
     let on_delete = create_ref(cx, props.on_delete);
     let delete_callback = create_ref(cx, move |_| {
-        let name = name.clone();
-        spawn_local_scoped(cx, async move {
-            log::debug!("Deleting job!");
-            let result = Request::delete("http://cnc:3000/job/delete_file")
-            .body(format!("{{\"path\":\"{}\"}}", name))
-            .header("Content-Type", "application/json")
-            .send()
-            .await;
-            log::debug!("Result: {:?}", result);
+        spawn_local_scoped(cx, async {
+            request::request_with_json(
+                HttpMethod::Delete,  // Should really have method bundled in...
+                api::DELETE_GCODE_FILE,
+                &DeleteGcodeFile { path: name.clone() }
+            ).await.unwrap();
             on_delete();
         });
     });
@@ -87,18 +81,14 @@ pub fn GCodeUpload<'a, F: Fn() -> () + 'a>(cx: Scope<'a>, props: GCodeUploadProp
                 let form_data = FormData::new().unwrap();
                 form_data.append_with_str("filename", &file.name()).unwrap();
                 form_data.append_with_blob_and_filename("file", &file, "filename.nc").unwrap();
-                let result = Request::post("http://cnc:3000/job/upload_file")
-                .body(form_data)
-                .send()
-                .await;
+                let result = request::request_with_body(
+                    HttpMethod::Post, 
+                    api::UPLOAD_GCODE_FILE, 
+                    form_data,
+                ).await;
                 log::debug!("Result: {:?}", result);
                 on_upload()
             }
-            /*let result = Request::post("http://cnc:3000/job/run_file")
-            .body(format!("{{\"path\":\"{}\"}}", name))
-            .header("Content-Type", "application/json")
-            .send()
-            .await;*/
             log::debug!("welp");
         });
     });
@@ -114,10 +104,11 @@ pub fn GCodePage(cx: Scope) -> View<DomNode> {
     let list = create_signal(cx, None);
     let get_list = || async {
         // TODO: Probably want some sort of debounce here?
-        let result = Request::get("http://cnc:3000/list_files")
-        .send()
-        .await
-        .unwrap();
+        let result = request::request(
+            HttpMethod::Get,
+            api::LIST_GCODE_FILES,
+        ).await.unwrap();
+        // TODO: Would be nice to wrap the un-jsoning in the request somehow...
         let names: Vec<String> = result.json().await.unwrap();
         list.set(Some(names));
     };

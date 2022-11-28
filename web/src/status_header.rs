@@ -1,6 +1,7 @@
 use std::mem::forget;
 use std::sync::Arc;
 
+use common::api::{self, OverrideControl};
 use futures::future::Fuse;
 use reqwasm::websocket::{futures::WebSocket, Message};
 use reqwasm::http::Request;
@@ -18,6 +19,7 @@ use sycamore::futures::spawn_local_scoped;
 use common::grbl::{GrblState, GrblFullInfo};
 
 use crate::mdc::IconButton;
+use crate::request::{self, HttpMethod};
 
 pub struct GlobalInfo<'a> {
     pub grbl_info: &'a ReadSignal<Option<common::grbl::GrblFullInfo>>,
@@ -29,8 +31,8 @@ pub fn global_info<'a>(cx: Scope<'a>) -> &'a GlobalInfo<'a> {
     let job_info = create_signal(cx, "Waiting for connection...".to_string());
     let grbl_info = create_signal(cx, None);
     spawn_local_scoped(cx, async move {
-        let mut ws = WebSocket::open("ws://cnc:3000/debug/listen_status").unwrap();
-        let mut ws2 = WebSocket::open("ws://cnc:3000/debug/listen_position").unwrap();
+        let mut ws = request::open_websocket(api::LISTEN_TO_JOB_STATUS);
+        let mut ws2 = request::open_websocket(api::LISTEN_TO_MACHINE_STATUS);
         let mut ws_next = ws.next().fuse();
         let mut ws2_next = ws2.next().fuse();
         loop {
@@ -72,14 +74,14 @@ pub fn global_info<'a>(cx: Scope<'a>) -> &'a GlobalInfo<'a> {
 
 
 #[derive(Prop)]
-pub struct PercentOverrideControllerProps<F: Fn(&GrblFullInfo) -> String> {
-    url_slug: String,
+pub struct PercentOverrideControllerProps<'a, F: Fn(&GrblFullInfo) -> String> {
+    urls: OverrideControl<'a>,
     heading: String,
     getter: F,
 }
 
 #[component]
-pub fn PercentOverrideController<'a, F: Fn(&GrblFullInfo) -> String + 'a>(cx: Scope<'a>, props: PercentOverrideControllerProps<F>) -> View<DomNode> {
+pub fn PercentOverrideController<'a, F: Fn(&GrblFullInfo) -> String + 'a>(cx: Scope<'a>, props: PercentOverrideControllerProps<'a, F>) -> View<DomNode> {
     let css_style = style! { r#"
         display: flex;
         align-items: center;
@@ -92,20 +94,16 @@ pub fn PercentOverrideController<'a, F: Fn(&GrblFullInfo) -> String + 'a>(cx: Sc
     }.expect("CSS should work");
 
     let global_info: &GlobalInfo = use_context(cx);
-    let callback_for_url = move |url: String| {
+    let callback_for_url = move |url: &'a str| {
         create_ref(cx, move || {
-            let url = url.clone();
-            spawn_local(async move {
-                let result = Request::post(&url).send().await;
-                log::debug!("Result: {:?}", result);
-            })    
+            request::request_detached(HttpMethod::Post, url)
         })
     };
-    let feed_reset = callback_for_url(format!("http://cnc:3000/command/override/{}/reset", props.url_slug));
-    let feed_increase_10 = callback_for_url(format!("http://cnc:3000/command/override/{}/plus10", props.url_slug));
-    let feed_increase_1 = callback_for_url(format!("http://cnc:3000/command/override/{}/plus1", props.url_slug));
-    let feed_decrease_1 = callback_for_url(format!("http://cnc:3000/command/override/{}/minus1", props.url_slug));
-    let feed_decrease_10 = callback_for_url(format!("http://cnc:3000/command/override/{}/minus10", props.url_slug));
+    let feed_reset = callback_for_url(props.urls.reset);
+    let feed_increase_10 = callback_for_url(props.urls.plus_10);
+    let feed_increase_1 = callback_for_url(props.urls.plus_1);
+    let feed_decrease_1 = callback_for_url(props.urls.minus_1);
+    let feed_decrease_10 = callback_for_url(props.urls.minus_10);
 
     view! { cx,
         div(class=css_style.get_class_name()) {
@@ -138,7 +136,7 @@ pub fn OverrideController(cx: Scope) -> View<DomNode> {
     }.expect("CSS should work");
     view! { cx, 
         div(class=css_style.get_class_name()) {
-            PercentOverrideController(url_slug="feed".into(), heading="Feed override:".into(), getter=|v| v.feed_override.to_string())
+            PercentOverrideController(urls=api::FEED_OVERRIDE, heading="Feed override:".into(), getter=|v| v.feed_override.to_string())
             // PercentOverrideController(url_slug="spindle".into(), heading="Spindle override:".into(), getter=|v| v.spindle_override.to_string())
         }
     }
@@ -167,38 +165,33 @@ pub fn LeftStatusHeader(cx: Scope) -> View<DomNode> {
     });
     let on_click = create_ref(cx, || {
         let url = if *in_motion.get() {
-            "http://cnc:3000/command/feed_hold"
+            api::COMMAND_PAUSE
         } else {
-            "http://cnc:3000/command/feed_resume"
+            api::COMMAND_RESUME
         };
-        spawn_local(async{
-            let result = Request::post(url).send().await;
-            log::debug!("Result: {:?}", result);
-        })
+        request::request_detached(
+            HttpMethod::Post,
+            url
+        );
     });
     let stop = create_ref(cx, || {
-        spawn_local(async{
-            let result = Request::post("http://cnc:3000/command/stop").send().await;
-            log::debug!("Result: {:?}", result);
-        })
+        request::request_detached(
+            HttpMethod::Post,
+            api::COMMAND_STOP
+        );
     });
     let reset = create_ref(cx, || {
-        spawn_local(async{
-            let result = Request::post("http://cnc:3000/command/reset").send().await;
-            log::debug!("Result: {:?}", result);
-        })
+        request::request_detached(
+            HttpMethod::Post,
+            api::COMMAND_RESET
+        );
     });
     let unlock = create_ref(cx, || {
-        let line = "$X";
-        let request = Request::post("http://cnc:3000/debug/send")
-            .body(line)
-            .send();
-        log::debug!("Sending!");
-        spawn_local(async move {
-            log::debug!("Inside unlock!");
-            let result = request.await.expect("Request should go through!");
-            log::debug!("Sent unlock! {:?}", result);
-        });
+        request::request_detached_with_body(
+            HttpMethod::Post,
+            api::SEND_RAW_GCODE,
+            "$X"
+        );
     });
     let home_disabled = create_selector(cx, || {
         (&*global_info.grbl_info.get()).as_ref().map_or(true, |v| {
@@ -216,16 +209,11 @@ pub fn LeftStatusHeader(cx: Scope) -> View<DomNode> {
         })
     });
     let home = create_ref(cx, || {
-        let line = "\\$H";
-        let request = Request::post("http://cnc:3000/debug/send")
-            .body(line)
-            .send();
-        log::debug!("Sending!");
-        spawn_local(async move {
-            log::debug!("Inside home!");
-            let result = request.await.expect("Request should go through!");
-            log::debug!("Sent home! {:?}", result);
-        });
+        request::request_detached_with_body(
+            HttpMethod::Post,
+            api::SEND_RAW_GCODE,
+            "$H"
+        );
     });
     let button_kind = create_selector(cx, || {
         if *in_motion.get() {

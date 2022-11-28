@@ -2,6 +2,7 @@ use std::io::Read;
 use std::mem::forget;
 use std::sync::Arc;
 
+use common::api;
 use futures::future::{Fuse, FusedFuture};
 use reqwasm::websocket::{futures::WebSocket, Message};
 use reqwasm::http::Request;
@@ -15,6 +16,7 @@ use stylist::style;
 use web_sys::{KeyboardEvent, Event};
 use gloo_timers::future::sleep;
 use std::time::Duration;
+use crate::request::{self, HttpMethod};
 use crate::utils::async_sycamore;
 
 #[derive(Prop)]
@@ -95,7 +97,7 @@ pub fn DebugPage(cx: Scope) -> View<DomNode> {
     let (mut message_list_sender, message_list) = async_sycamore::create_channel(cx, vec![]);
     {
         async_sycamore::spawn_local_drop_with_context(cx, async move {
-            let mut ws = WebSocket::open("ws://cnc:3000/debug/listen_raw").unwrap();
+            let mut ws = request::open_websocket(api::LISTEN_TO_RAW_MACHINE);
             let mut ws_next = ws.next().fuse();
             let mut values = vec![];
             let mut next_update = Fuse::terminated(); //sleep(Duration::from_millis(0)).fuse();
@@ -138,15 +140,7 @@ pub fn DebugPage(cx: Scope) -> View<DomNode> {
         let keyboard_event: KeyboardEvent = event.unchecked_into();
         if keyboard_event.key() == "Enter" {
             let line = &*input_value.get();
-            let request = Request::post("http://cnc:3000/debug/send")
-                .body(line)
-                .send();
-            log::debug!("Sending!");
-            spawn_local(async move {
-                log::debug!("Inside!");
-                let result = request.await.expect("Request should go through!");
-                log::debug!("Sent! {:?}", result);
-            });
+            request::request_detached_with_body(HttpMethod::Post, api::SEND_RAW_GCODE, line);
             input_value.set("".to_string());
         }
     };

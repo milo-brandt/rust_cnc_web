@@ -2,6 +2,7 @@ use std::io::Read;
 use std::mem::forget;
 use std::sync::Arc;
 
+use common::api;
 use futures::future::{Fuse, FusedFuture};
 use reqwasm::websocket::{futures::WebSocket, Message};
 use reqwasm::http::Request;
@@ -16,15 +17,16 @@ use web_sys::{KeyboardEvent, Event};
 use gloo_timers::future::sleep;
 use std::time::Duration;
 use sycamore::futures::create_resource;
+use crate::request::{HttpMethod, self};
 use crate::status_header::GlobalInfo;
 use crate::utils::async_sycamore;
 
 async fn jog(x: f64, y: f64, z: f64) {
-    let result = Request::post("http://cnc:3000/debug/gcode_unchecked_if_free")
-    .body(format!("$J=G21 G91 X{:.3} Y{:.3} Z{:.3} F6000.000", x, y, z))
-    .send()
-    .await;
-    log::debug!("Jog result: {:?}", result);
+    request::request_with_body(
+        HttpMethod::Post,
+        api::SEND_RAW_GCODE,
+        format!("$J=G21 G91 X{:.3} Y{:.3} Z{:.3} F6000.000", x, y, z)
+    ).await.unwrap();
 }
 
 #[derive(Prop)]

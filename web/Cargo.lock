@@ -547,6 +547,7 @@ dependencies = [
  "gloo-timers",
  "log",
  "reqwasm",
+ "serde",
  "serde_json",
  "stylist",
  "sycamore",

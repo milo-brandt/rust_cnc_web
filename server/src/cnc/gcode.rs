@@ -1,10 +1,11 @@
 pub mod display;
 pub mod parser;
+pub mod geometry;
 
 #[derive(Debug)]
-pub struct AxisValues(Vec<(usize, f64)>); //(axis, value) pairs
+pub struct AxisValues(pub Vec<(usize, f64)>); //(axis, value) pairs
 #[derive(Debug)]
-pub struct OffsetAxisValues(Vec<(usize, f64)>); //(axis, value) pairs
+pub struct OffsetAxisValues(pub Vec<(usize, f64)>); //(axis, value) pairs
 #[derive(Debug)]
 pub enum Plane {
     XY,

@@ -1,4 +1,4 @@
-use std::{rc::Rc, cell::RefCell};
+use std::{rc::Rc, cell::RefCell, cmp::{min, max}};
 
 use js_sys::Math::{sin, cos};
 use quaternion_core::{Quaternion, QuaternionOps};
@@ -10,12 +10,42 @@ use web_sys::{WebGl2RenderingContext, MouseEvent};
 use crate::render::{compile_shader, link_program, add_loop_callback};
 
 #[derive(Prop)]
-pub struct DisplayProps {
-    positions: Vec<[f32; 3]>
+pub struct DisplayProps<'a> {
+    positions: &'a ReadSignal<Vec<[f32; 3]>>
+}
+
+#[derive(Debug)]
+struct MinMax {
+    min: [f32; 3],
+    max: [f32; 3],
+}
+fn enlarge_to(old: MinMax, new: &[f32; 3]) -> MinMax {
+    MinMax {
+        min: [
+            old.min[0].min(new[0]),
+            old.min[1].min(new[1]),
+            old.min[2].min(new[2]),
+        ],
+        max: [
+            old.max[0].max(new[0]),
+            old.max[1].max(new[1]),
+            old.max[2].max(new[2]),
+        ]
+    }
+}
+fn max_bounds_of(r: &MinMax) -> f32 {
+    (r.max[0] - r.min[0]).max(r.max[1] - r.min[1]).max(r.max[2] - r.min[2])
+}
+fn center_of(r: &MinMax) -> [f32; 3] {
+    [
+        (r.max[0] + r.min[0]) * 0.5,
+        (r.max[1] + r.min[1]) * 0.5,
+        (r.max[2] + r.min[2]) * 0.5,
+    ]
 }
 
 #[component]
-pub fn DisplayPage(cx: Scope, props: DisplayProps) -> View<DomNode> {
+pub fn DisplayPage<'a>(cx: Scope<'a>, props: DisplayProps<'a>) -> View<DomNode> {
     let css_style = style! { r#"
         width: 100vw;
         height: 70vh;
@@ -94,6 +124,10 @@ pub fn DisplayPage(cx: Scope, props: DisplayProps) -> View<DomNode> {
         mouse_closure.forget();    
     }
 
+    let ref_signal = create_rc_signal_from_rc(props.positions.get());
+    let ref_signal_copy = ref_signal.clone();
+    create_effect(cx, move || ref_signal_copy.set_rc(props.positions.get()));
+
 
     add_loop_callback(move |t| {
         let width = canvas.client_width() as u32;
@@ -108,7 +142,19 @@ pub fn DisplayPage(cx: Scope, props: DisplayProps) -> View<DomNode> {
 
         //let vertices: [f32; 9] = [-1.0, 1.0, 0.0,    verticality as f32, -1.0, 0.0,     1.0, 1.0, 0.0];
 
-        let vertices: Vec<f32> = props.positions.iter().flatten().cloned().collect();
+        let vertices_vec = &*ref_signal.get();
+        if vertices_vec.is_empty() {
+            return;
+        }
+        let first = vertices_vec[0];
+        let bounds = vertices_vec.iter().fold(MinMax{ min: first, max: first }, enlarge_to);
+
+        let max_dif = max_bounds_of(&bounds).max(0.001);
+        let center = center_of(&bounds);
+        log::debug!("{:?} {:?} {}", bounds, center, max_dif);
+        let scale_factor = 1.0 / max_dif;
+
+        let mut vertices: Vec<f32> = ref_signal.get().iter().flatten().cloned().collect();
 
         let aspect = (width as f32) / (height as f32);
 
@@ -123,14 +169,20 @@ pub fn DisplayPage(cx: Scope, props: DisplayProps) -> View<DomNode> {
         }
         last_t = Some(t);
 
+        let true_center = quaternion_core::point_rotation(quaternion_core::conj(*current_position.borrow()), center);
+        
         let dcm = quaternion_core::to_dcm(*current_position.borrow());
 
         // log::debug!("{:?}", dcm);
 
-        context.uniform_matrix3fv_with_f32_array(Some(&mat_location), false, &[dcm[0][0], dcm[0][1], dcm[0][2],  dcm[1][0], dcm[1][1], dcm[1][2], dcm[2][0], dcm[2][1], dcm[2][2]]);
+        context.uniform_matrix3fv_with_f32_array(Some(&mat_location), false, 
+            &[dcm[0][0] * scale_factor, dcm[0][1] * scale_factor, dcm[0][2] * scale_factor,
+              dcm[1][0] * scale_factor, dcm[1][1] * scale_factor, dcm[1][2] * scale_factor,
+              dcm[2][0] * scale_factor, dcm[2][1] * scale_factor, dcm[2][2] * scale_factor]
+        );
 
-        context.uniform3fv_with_f32_array(Some(&offset_location), &[0.0, 0.0, 2.0]);
-        context.uniform2fv_with_f32_array(Some(&scale_location), &[1.0 / aspect, 1.0]);
+        context.uniform3fv_with_f32_array(Some(&offset_location), &[-true_center[0] * scale_factor, -true_center[1]  * scale_factor, -true_center[2]  * scale_factor + 2.0]);
+        context.uniform2fv_with_f32_array(Some(&scale_location), &[1.5 / aspect, 1.5]);
 
         context.bind_buffer(WebGl2RenderingContext::ARRAY_BUFFER, Some(&buffer));
 

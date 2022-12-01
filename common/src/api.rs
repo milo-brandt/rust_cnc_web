@@ -21,6 +21,10 @@ pub struct RunGcodeFile {
 pub struct DeleteGcodeFile {
     pub path: String,
 }
+#[derive(Serialize, Deserialize)]
+pub struct ExamineGcodeFile {
+    pub path: String,
+}
 
 //////
 // Job
@@ -29,6 +33,7 @@ pub const RUN_GCODE_FILE: &str = "/job/run_file";
 pub const UPLOAD_GCODE_FILE: &str = "/job/upload_file";
 pub const DELETE_GCODE_FILE: &str = "/job/delete_file";
 pub const LIST_GCODE_FILES: &str = "/job/list_files";
+pub const EXAMINE_LINES_IN_GCODE_FILE: &str = "/job/examine_lines_in_file";
 
 /////
 // Debug utilities

@@ -8,10 +8,14 @@ mod display_page;
 mod request;
 pub mod render;
 
+use common::api;
 use display_page::DisplayPage;
+use gloo_timers::future::sleep;
 use jog_page::JogPage;
+use request::HttpMethod;
 use status_header::GlobalInfo;
 use status_header::global_info;
+use sycamore::futures::spawn_local_scoped;
 use sycamore::prelude::*;
 
 use reqwasm::websocket::{futures::WebSocket, Message};
@@ -285,16 +289,46 @@ fn NotFound(cx: Scope) -> View<DomNode> {
 }
 
 fn main() {
-    crate::render::start().unwrap();
     console_error_panic_hook::set_once();
     wasm_logger::init(wasm_logger::Config::default());
     sycamore::render(|cx| {
         provide_context_ref(cx,  unsafe { mem::transmute::<_, &GlobalInfo<'static>>(global_info(cx)) });
+        let value = create_signal(cx, vec![
+            [-0.7, -0.7, 1.0],
+            [0.7, -0.7, 1.0],
+            [0.7, -0.7, 2.4],
+            [-0.7, -0.7, 2.4],
+            [-0.7, 0.7, 2.4],
+            [0.7, 0.7, 2.4],
+            [0.7, 0.7, 1.0],
+            [-0.7, 0.7, 1.0],
+            [-0.7, -0.7, 1.0],
+            [-0.7, -0.7, 2.4],
+            [-0.7, 0.7, 2.4],
+            [-0.7, 0.7, 1.0],
+            [0.7, 0.7, 1.0],
+            [0.7, -0.7, 1.0],
+            [0.7, -0.7,  2.4],
+            [0.7, 0.7, 2.4],
+        ]);
+        spawn_local_scoped(cx, async {
+            let result = request::request_with_json(
+                HttpMethod::Post,
+                api::EXAMINE_LINES_IN_GCODE_FILE,
+                &api::ExamineGcodeFile {
+                    path: "disk_job.nc".into()
+                }
+            ).await.unwrap();
+            let result: Vec<[f32; 3]> = result.json().await.unwrap();
+            // let mut old_value = (*value.get()).clone();
+            // old_value.push([0.0, 0.0, 0.0]);
+            value.set(result);
+        });
         view! { cx,
             StatusHeader
             Router(
                 integration=HistoryIntegration::new(),
-                view=|cx, route: &ReadSignal<AppRoutes>| {
+                view=move |cx, route: &ReadSignal<AppRoutes>| {
                     view! { cx,
                         div(class="app") {
                             (match route.get().as_ref() {
@@ -314,24 +348,7 @@ fn main() {
                                     NotFound
                                 },
                                 AppRoutes::DisplayGCode => view! { cx,
-                                    DisplayPage(positions=vec![
-                                        [-0.7, -0.7, -0.7],
-                                        [0.7, -0.7, -0.7],
-                                        [0.7, -0.7, 0.7],
-                                        [-0.7, -0.7, 0.7],
-                                        [-0.7, 0.7, 0.7],
-                                        [0.7, 0.7, 0.7],
-                                        [0.7, 0.7, -0.7],
-                                        [-0.7, 0.7, -0.7],
-                                        [-0.7, -0.7, -0.7],
-                                        [-0.7, -0.7, 0.7],
-                                        [-0.7, 0.7, 0.7],
-                                        [-0.7, 0.7, -0.7],
-                                        [0.7, 0.7, -0.7],
-                                        [0.7, -0.7, -0.7],
-                                        [0.7, -0.7,  0.7],
-                                        [0.7, 0.7, 0.7],
-                                    ])
+                                    DisplayPage(positions=value)
                                 }
                             })
                         }

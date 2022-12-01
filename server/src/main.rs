@@ -3,7 +3,7 @@
 use std::{sync::Mutex, convert::Infallible, thread};
 
 use axum::{response::{sse::Event, Sse}, extract::{multipart::Field, ContentLengthLimit}, handler::Handler};
-use cnc::{grbl::{messages::{GrblStateInfo}, standard_handler::{StandardHandler, ImmediateHandle, MachineDebugEvent, ImmediateMessage, JobHandle}, new_machine::run_machine_with_handler}, stream_job::sized_stream_to_job};
+use cnc::{grbl::{messages::{GrblStateInfo}, standard_handler::{StandardHandler, ImmediateHandle, MachineDebugEvent, ImmediateMessage, JobHandle}, new_machine::run_machine_with_handler}, stream_job::sized_stream_to_job, gcode::{geometry::{as_lines_simple, as_lines_from_best_start}, AxisValues}};
 use futures::{Stream, Future, pin_mut};
 use hyper::server;
 use serde::Serialize;
@@ -159,6 +159,7 @@ async fn run_server(machine: ImmediateHandle, debug_rx: history_broadcast::Recei
         .route(api::UPLOAD_GCODE_FILE, post(upload))
         .route(api::DELETE_GCODE_FILE, delete(delete_file))
         .route(api::LIST_GCODE_FILES, get(get_gcode_list))
+        .route(api::EXAMINE_LINES_IN_GCODE_FILE, post(get_gcode_file_positions))
         
         .route(api::SEND_RAW_GCODE, post(run_gcode_unchecked))
         .route(api::LISTEN_TO_RAW_MACHINE, get(listen_raw))
@@ -286,6 +287,53 @@ async fn run_gcode_unchecked(
         Err(_) => "Job not sent!".to_string(),
     }
 }
+
+
+fn axis_value_to_array(v: &AxisValues) -> [f32; 3] {
+    let mut result = [0.0, 0.0, 0.0];
+    for (coord, value) in &v.0 {
+        if coord < &3 {
+            result[*coord] = *value as f32;
+        }
+    }
+    result
+}
+
+async fn get_gcode_file_positions(
+    message: Json<api::ExamineGcodeFile>,
+) -> Result<Json<Vec<[f32; 3]>>, String> {
+    let mut program = Vec::new();
+
+    /*
+        A lot of code duplication; should perhaps make an iterator that just reads through a 
+        GCode file and parses it... (or Stream I guess?)
+    */
+
+    let file = match File::open(format!("gcode/{}", message.path)).await {
+        Ok(file) => file,
+        Err(e) => return Err(format!("Error! {:?}", e)),
+    };
+    let file = BufReader::new(file);
+    let mut lines = file.lines();
+    let spec = default_settings();
+    loop {
+        match lines.next_line().await {
+            Ok(Some(line)) => {
+                match parse_generalized_line(&spec, &line) {
+                    Ok(GeneralizedLine::Line(line)) => {
+                        program.push(line);
+                    }
+                    Ok(_) => {}
+                    Err(e) => return Err(format!("Error! {:?}", e)),
+                }
+            }
+            Ok(None) => break,
+            Err(e) => return Err(format!("Error: {:?}", e)),
+        }
+    }
+    let lines = as_lines_from_best_start(&program);
+    Ok(Json(lines.iter().map(axis_value_to_array).collect()))
+} 
 
 async fn run_gcode_file(
     message: Json<api::RunGcodeFile>,

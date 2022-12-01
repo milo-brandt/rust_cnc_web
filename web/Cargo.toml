@@ -14,10 +14,26 @@ wasm-bindgen-futures = "0.4"
 log = "0.4"
 futures = "0.3"
 wasm-logger = "0.2"
-web-sys = {version="0.3", features=["File", "FileList"]}
+web-sys = {version="0.3", features=[
+    "File",
+    "FileList",
+    "Document",
+    "Element",
+    "HtmlCanvasElement",
+    "MouseEvent",
+    "WebGlBuffer",
+    "WebGlVertexArrayObject",
+    "WebGl2RenderingContext",
+    "WebGlProgram",
+    "WebGlShader",
+    "WebGlUniformLocation",
+    "Window",
+]}
 stylist = "0.10"
 console_error_panic_hook = "0.1"
 gloo-timers = {version="0.2", features=["futures"]}
 common = { path = "../common" }
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
+js-sys = "0.3.60"
+quaternion-core = "0.3"

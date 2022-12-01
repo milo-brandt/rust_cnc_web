@@ -4,8 +4,11 @@ mod debug_page;
 mod status_header;
 mod gcode_job_page;
 mod jog_page;
+mod display_page;
 mod request;
+pub mod render;
 
+use display_page::DisplayPage;
 use jog_page::JogPage;
 use status_header::GlobalInfo;
 use status_header::global_info;
@@ -228,6 +231,8 @@ enum AppRoutes {
     SendGcode,
     #[to("/jog")]
     Jog,
+    #[to("/view")]
+    DisplayGCode,
     #[not_found]
     NotFound,
 }
@@ -248,6 +253,10 @@ fn IndexPage(cx: Scope) -> View<DomNode> {
             br {}
             a(href="/jog") {
                 "Jog"
+            }      
+            br {}
+            a(href="/view") {
+                "???"
             }      
         }
     }
@@ -276,6 +285,7 @@ fn NotFound(cx: Scope) -> View<DomNode> {
 }
 
 fn main() {
+    crate::render::start().unwrap();
     console_error_panic_hook::set_once();
     wasm_logger::init(wasm_logger::Config::default());
     sycamore::render(|cx| {
@@ -303,6 +313,26 @@ fn main() {
                                 AppRoutes::NotFound => view! { cx,
                                     NotFound
                                 },
+                                AppRoutes::DisplayGCode => view! { cx,
+                                    DisplayPage(positions=vec![
+                                        [-0.7, -0.7, -0.7],
+                                        [0.7, -0.7, -0.7],
+                                        [0.7, -0.7, 0.7],
+                                        [-0.7, -0.7, 0.7],
+                                        [-0.7, 0.7, 0.7],
+                                        [0.7, 0.7, 0.7],
+                                        [0.7, 0.7, -0.7],
+                                        [-0.7, 0.7, -0.7],
+                                        [-0.7, -0.7, -0.7],
+                                        [-0.7, -0.7, 0.7],
+                                        [-0.7, 0.7, 0.7],
+                                        [-0.7, 0.7, -0.7],
+                                        [0.7, 0.7, -0.7],
+                                        [0.7, -0.7, -0.7],
+                                        [0.7, -0.7,  0.7],
+                                        [0.7, 0.7, 0.7],
+                                    ])
+                                }
                             })
                         }
                     }

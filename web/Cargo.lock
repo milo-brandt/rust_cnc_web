@@ -317,6 +317,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "num-traits"
+version = "0.2.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "578ede34cf02f8924ab9447f50c28075b4d3e5b269972345e7e0372b38c6cdcd"
+dependencies = [
+ "autocfg",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -391,6 +400,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94e2ef8dbfc347b10c094890f778ee2e36ca9bb4262e86dc99cd217e35f3470b"
 dependencies = [
  "unicode-ident",
+]
+
+[[package]]
+name = "quaternion-core"
+version = "0.3.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e4d27f3091c1892f110e297e7139b270ec6b124995e73dba059aecac912d3f4d"
+dependencies = [
+ "num-traits",
 ]
 
 [[package]]
@@ -545,7 +563,9 @@ dependencies = [
  "console_error_panic_hook",
  "futures",
  "gloo-timers",
+ "js-sys",
  "log",
+ "quaternion-core",
  "reqwasm",
  "serde",
  "serde_json",

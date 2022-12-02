@@ -112,10 +112,7 @@ fn arc_points(start: &mut HashMap<usize, f64>, end: &AxisValues, offsets: &Offse
     let distance_start = tuple_mag(tuple_dif(arc_start, arc_center));
     let distance_end = tuple_mag(tuple_dif(arc_end, arc_center));
     let distance_difference = distance_end - distance_start;
-    if distance_difference.abs() > 0.001 {
-        println!("DISTANCE: {} => {}", distance_start, distance_end);
-        println!("ARC START, CENTER, END: {:?} {:?} {:?} ", arc_start, arc_center, arc_end);
-        println!("START, END, OFFSET, ARC_INDICES: {:?} {:?} {:?} {:?}", start, end, offsets, arc_indices);
+    if distance_difference.abs() > 0.01 {
         return Err(GCodePositionError::InvalidArc);
     }
     let start_angle = angle_of(arc_start);

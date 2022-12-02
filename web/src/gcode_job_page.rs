@@ -56,6 +56,7 @@ pub fn GcodeFile<'a, F: Fn() -> () + 'a>(cx: Scope<'a>, props: GcodeFileProps<'a
             (name.clone()) " "
             button(on:click=run_callback, disabled=!*props.can_send_job.get()) { "Run!" }
             button(on:click=delete_callback, disabled=!*props.can_send_job.get()) { "Delete!" }
+            a(href=format!("/view/{}", name)) { "View!" }
         }
     }
 }

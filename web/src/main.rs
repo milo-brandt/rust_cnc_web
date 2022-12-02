@@ -235,8 +235,10 @@ enum AppRoutes {
     SendGcode,
     #[to("/jog")]
     Jog,
-    #[to("/view")]
-    DisplayGCode,
+    #[to("/view/<name>")]
+    DisplayGCode {
+        name: String
+    },
     #[not_found]
     NotFound,
 }
@@ -257,10 +259,6 @@ fn IndexPage(cx: Scope) -> View<DomNode> {
             br {}
             a(href="/jog") {
                 "Jog"
-            }      
-            br {}
-            a(href="/view") {
-                "???"
             }      
         }
     }
@@ -293,37 +291,6 @@ fn main() {
     wasm_logger::init(wasm_logger::Config::default());
     sycamore::render(|cx| {
         provide_context_ref(cx,  unsafe { mem::transmute::<_, &GlobalInfo<'static>>(global_info(cx)) });
-        let value = create_signal(cx, vec![
-            [-0.7, -0.7, 1.0],
-            [0.7, -0.7, 1.0],
-            [0.7, -0.7, 2.4],
-            [-0.7, -0.7, 2.4],
-            [-0.7, 0.7, 2.4],
-            [0.7, 0.7, 2.4],
-            [0.7, 0.7, 1.0],
-            [-0.7, 0.7, 1.0],
-            [-0.7, -0.7, 1.0],
-            [-0.7, -0.7, 2.4],
-            [-0.7, 0.7, 2.4],
-            [-0.7, 0.7, 1.0],
-            [0.7, 0.7, 1.0],
-            [0.7, -0.7, 1.0],
-            [0.7, -0.7,  2.4],
-            [0.7, 0.7, 2.4],
-        ]);
-        spawn_local_scoped(cx, async {
-            let result = request::request_with_json(
-                HttpMethod::Post,
-                api::EXAMINE_LINES_IN_GCODE_FILE,
-                &api::ExamineGcodeFile {
-                    path: "disk_job.nc".into()
-                }
-            ).await.unwrap();
-            let result: Vec<[f32; 3]> = result.json().await.unwrap();
-            // let mut old_value = (*value.get()).clone();
-            // old_value.push([0.0, 0.0, 0.0]);
-            value.set(result);
-        });
         view! { cx,
             StatusHeader
             Router(
@@ -347,8 +314,8 @@ fn main() {
                                 AppRoutes::NotFound => view! { cx,
                                     NotFound
                                 },
-                                AppRoutes::DisplayGCode => view! { cx,
-                                    DisplayPage(positions=value)
+                                AppRoutes::DisplayGCode { name } => view! { cx,
+                                    DisplayPage(name=name.clone())
                                 }
                             })
                         }

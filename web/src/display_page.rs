@@ -1,16 +1,17 @@
-use std::{rc::Rc, cell::RefCell, cmp::{min, max}};
+use std::{rc::Rc, cell::RefCell, cmp::{min, max}, fmt::Display};
 
+use common::api;
 use js_sys::Math::{sin, cos};
 use quaternion_core::{Quaternion, QuaternionOps};
 use stylist::style;
-use sycamore::prelude::*;
+use sycamore::{prelude::*, futures::spawn_local_scoped};
 use wasm_bindgen::{JsCast, JsValue, prelude::Closure};
 use web_sys::{WebGl2RenderingContext, MouseEvent};
 
-use crate::render::{compile_shader, link_program, add_loop_callback};
+use crate::{render::{compile_shader, link_program, add_loop_callback}, request::{self, HttpMethod}};
 
 #[derive(Prop)]
-pub struct DisplayProps<'a> {
+pub struct InteractiveDisplayProps<'a> {
     positions: &'a ReadSignal<Vec<[f32; 3]>>
 }
 
@@ -45,7 +46,7 @@ fn center_of(r: &MinMax) -> [f32; 3] {
 }
 
 #[component]
-pub fn DisplayPage<'a>(cx: Scope<'a>, props: DisplayProps<'a>) -> View<DomNode> {
+pub fn InteractiveDisplay<'a>(cx: Scope<'a>, props: InteractiveDisplayProps<'a>) -> View<DomNode> {
     let css_style = style! { r#"
         width: 100vw;
         height: 70vh;
@@ -101,7 +102,7 @@ pub fn DisplayPage<'a>(cx: Scope<'a>, props: DisplayProps<'a>) -> View<DomNode> 
     let offset_location = context.get_uniform_location(&program, "offset").unwrap();
     let scale_location = context.get_uniform_location(&program, "scale").unwrap();
 
-    let current_position: Rc<RefCell<Quaternion<f32>>> = Rc::new(RefCell::new((1.0, [0.0, 0.0, 0.0])));
+    let current_position: Rc<RefCell<Quaternion<f32>>> = Rc::new(RefCell::new((0.0, [0.0, 1.0, 0.0])));
 
     let mut last_t = None;
 
@@ -230,4 +231,32 @@ pub fn DisplayPage<'a>(cx: Scope<'a>, props: DisplayProps<'a>) -> View<DomNode> 
     });
 
     View::new_node(base)
+}
+
+#[derive(Prop)]
+pub struct DisplayPageProps {
+    name: String
+}
+
+#[component]
+pub fn DisplayPage(cx: Scope, props: DisplayPageProps) -> View<DomNode> {
+    let value = create_signal(cx, vec![]);
+    spawn_local_scoped(cx, async {
+        let result = request::request_with_json(
+            HttpMethod::Post,
+            api::EXAMINE_LINES_IN_GCODE_FILE,
+            &api::ExamineGcodeFile {
+                path: props.name.into()
+            }
+        ).await.unwrap();
+        let result: Vec<[f32; 3]> = result.json().await.unwrap();
+        // let mut old_value = (*value.get()).clone();
+        // old_value.push([0.0, 0.0, 0.0]);
+        value.set(result);
+    });
+    view! { cx,
+        InteractiveDisplay(positions=value)
+        br{}
+        a(href="/send_gcode") { "Back!" }
+    }
 }

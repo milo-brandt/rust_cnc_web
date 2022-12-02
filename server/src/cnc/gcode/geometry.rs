@@ -115,8 +115,8 @@ fn arc_points(start: &mut HashMap<usize, f64>, end: &AxisValues, offsets: &Offse
     if distance_difference.abs() > 0.01 {
         return Err(GCodePositionError::InvalidArc);
     }
-    let start_angle = angle_of(arc_start);
-    let mut end_angle = angle_of(arc_end);
+    let start_angle = angle_of(tuple_dif(arc_start, arc_center));
+    let mut end_angle = angle_of(tuple_dif(arc_end, arc_center));
     if end_angle < start_angle {
         end_angle += 2.0*PI;
     }
@@ -152,6 +152,8 @@ fn arc_points(start: &mut HashMap<usize, f64>, end: &AxisValues, offsets: &Offse
     let axis_start = map_to_axis_values(start);
     update_position(start, end)?;
     let axis_end = map_to_axis_values(start);
+    println!("STARTS {:?} {:?}", axis_start, get_step(0));
+    println!("ENDS {:?} {:?}", axis_end, get_step(step_count));
     Ok(chain!(
         [axis_start],
         (1..step_count).map(get_step),

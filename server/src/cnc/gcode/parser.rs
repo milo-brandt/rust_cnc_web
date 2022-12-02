@@ -3,7 +3,7 @@ use {
         AxisValues, GCodeCommand, GCodeFormatSpecification, GCodeLine, GCodeModal, MoveMode,
         OffsetAxisValues, Orientation, ProbeDirection, ProbeRequirement,
     },
-    crate::cnc::gcode::{CoordinateMode, CoordinateSystem, Plane, SpindleMode, Unit},
+    crate::cnc::gcode::{CoordinateMode, CoordinateSystem, ArcPlane, SpindleMode, Unit},
     itertools::Itertools,
     nom::{
         bytes::complete::{tag, take_while},
@@ -313,17 +313,17 @@ fn parse_gcode_line_impl<'a, 'b>(
                 GCodePart::G("17") => append_modal!(
                     prior_input,
                     &mut line.modals,
-                    GCodeModal::SetArcPlane(Plane::XY)
+                    GCodeModal::SetArcPlane(ArcPlane::XY)
                 ),
                 GCodePart::G("18") => append_modal!(
                     prior_input,
                     &mut line.modals,
-                    GCodeModal::SetArcPlane(Plane::ZX)
+                    GCodeModal::SetArcPlane(ArcPlane::ZX)
                 ),
                 GCodePart::G("19") => append_modal!(
                     prior_input,
                     &mut line.modals,
-                    GCodeModal::SetArcPlane(Plane::YZ)
+                    GCodeModal::SetArcPlane(ArcPlane::YZ)
                 ),
                 GCodePart::G("20") => append_modal!(
                     prior_input,

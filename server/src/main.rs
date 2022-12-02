@@ -332,6 +332,10 @@ async fn get_gcode_file_positions(
         }
     }
     let lines = as_lines_from_best_start(&program);
+    let lines = match lines {
+        Err(e) => return Err(format!("Error! {:?}", e)),
+        Ok(lines) => lines,
+    };
     Ok(Json(lines.iter().map(axis_value_to_array).collect()))
 } 
 

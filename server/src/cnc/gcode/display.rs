@@ -1,7 +1,7 @@
 use {
     super::{
         AxisValues, CoordinateMode, CoordinateSystem, GCodeCommand, GCodeFormatSpecification,
-        GCodeLine, GCodeModal, MoveMode, OffsetAxisValues, Orientation, Plane, ProbeDirection,
+        GCodeLine, GCodeModal, MoveMode, OffsetAxisValues, Orientation, ArcPlane, ProbeDirection,
         ProbeRequirement, SpindleMode, Unit,
     },
     std::fmt::Display,
@@ -38,9 +38,9 @@ impl<'a> Display for GCodeModalPrinter<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.modal {
             GCodeModal::SetFeedrate(value) => write!(f, "F{:.1$}", value, self.float_digits),
-            GCodeModal::SetArcPlane(Plane::XY) => write!(f, "G17"),
-            GCodeModal::SetArcPlane(Plane::ZX) => write!(f, "G18"),
-            GCodeModal::SetArcPlane(Plane::YZ) => write!(f, "G19"),
+            GCodeModal::SetArcPlane(ArcPlane::XY) => write!(f, "G17"),
+            GCodeModal::SetArcPlane(ArcPlane::ZX) => write!(f, "G18"),
+            GCodeModal::SetArcPlane(ArcPlane::YZ) => write!(f, "G19"),
             GCodeModal::SetUnits(Unit::Inch) => write!(f, "G20"),
             GCodeModal::SetUnits(Unit::Millimeter) => write!(f, "G21"),
             GCodeModal::SetCoordinateSystem(CoordinateSystem::Coord0) => write!(f, "G54"),
@@ -229,7 +229,7 @@ mod test {
         let line = GCodeLine {
             modals: vec![
                 GCodeModal::SetUnits(Unit::Millimeter),
-                GCodeModal::SetArcPlane(Plane::YZ),
+                GCodeModal::SetArcPlane(ArcPlane::YZ),
             ],
             command: None,
         };

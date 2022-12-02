@@ -6,28 +6,28 @@ pub mod geometry;
 pub struct AxisValues(pub Vec<(usize, f64)>); //(axis, value) pairs
 #[derive(Debug)]
 pub struct OffsetAxisValues(pub Vec<(usize, f64)>); //(axis, value) pairs
-#[derive(Debug)]
-pub enum Plane {
+#[derive(Debug, Clone, Copy)]
+pub enum ArcPlane {
     XY,
     ZX,
     YZ,
 }
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum Unit {
     Inch,
     Millimeter,
 }
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum ProbeDirection {
     Towards,
     Away,
 }
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum ProbeRequirement {
     Optional,
     Require,
 }
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum CoordinateSystem {
     Coord0,
     Coord1,
@@ -36,17 +36,17 @@ pub enum CoordinateSystem {
     Coord4,
     Coord5,
 }
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum CoordinateMode {
     Absolute,
     Incremental,
 }
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum Orientation {
     Clockwise,
     Counterclockwise,
 }
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum SpindleMode {
     Clockwise,
     Off,
@@ -54,7 +54,7 @@ pub enum SpindleMode {
 #[derive(Debug)]
 pub enum GCodeModal {
     SetFeedrate(f64),
-    SetArcPlane(Plane),
+    SetArcPlane(ArcPlane),
     SetUnits(Unit),
     SetCoordinateSystem(CoordinateSystem),
     SetCoordinateMode(CoordinateMode),

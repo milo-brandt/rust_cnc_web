@@ -147,9 +147,9 @@ pub fn InteractiveDisplay<'a>(cx: Scope<'a>, props: InteractiveDisplayProps<'a>)
             value.prevent_default();
             let delta_y = value.delta_y();
             let mut zoom_level = current_zoom.borrow_mut();
-            if delta_y < 0.0 {
+            if delta_y > 0.0 {
                 *zoom_level *= 0.8;
-            } else if delta_y > 0.0 {
+            } else if delta_y < 0.0 {
                 *zoom_level *= 1.0/0.8;
             }
         });

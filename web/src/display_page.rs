@@ -6,7 +6,7 @@ use quaternion_core::{Quaternion, QuaternionOps};
 use stylist::style;
 use sycamore::{prelude::*, futures::spawn_local_scoped};
 use wasm_bindgen::{JsCast, JsValue, prelude::Closure};
-use web_sys::{WebGl2RenderingContext, MouseEvent};
+use web_sys::{WebGl2RenderingContext, MouseEvent, WheelEvent};
 
 use crate::{render::{compile_shader, link_program, add_loop_callback}, request::{self, HttpMethod}};
 
@@ -119,6 +119,7 @@ pub fn InteractiveDisplay<'a>(cx: Scope<'a>, props: InteractiveDisplayProps<'a>)
     let depth_cutoff_location = context.get_uniform_location(&program, "depth_cutoff").unwrap();
 
     let current_position: Rc<RefCell<Quaternion<f32>>> = Rc::new(RefCell::new((0.0, [0.0, 1.0, 0.0])));
+    let current_zoom: Rc<RefCell<f32> > = Rc::new(RefCell::new(1.0));
 
     let mut last_t = None;
 
@@ -139,6 +140,21 @@ pub fn InteractiveDisplay<'a>(cx: Scope<'a>, props: InteractiveDisplayProps<'a>)
         canvas.set_onmousemove(Some(mouse_closure.as_ref().unchecked_ref()));
 
         mouse_closure.forget();    
+    }
+    {
+        let current_zoom = current_zoom.clone();
+        let closure: Closure<dyn FnMut(WheelEvent)> = Closure::new(move |value: WheelEvent| {
+            value.prevent_default();
+            let delta_y = value.delta_y();
+            let mut zoom_level = current_zoom.borrow_mut();
+            if delta_y < 0.0 {
+                *zoom_level *= 0.8;
+            } else if delta_y > 0.0 {
+                *zoom_level *= 1.0/0.8;
+            }
+        });
+        canvas.set_onwheel(Some(closure.as_ref().unchecked_ref()));
+        closure.forget();
     }
     let slider_value = create_signal(cx, "100".to_string());
 
@@ -187,12 +203,6 @@ pub fn InteractiveDisplay<'a>(cx: Scope<'a>, props: InteractiveDisplayProps<'a>)
         let c = cos(t * 0.0017) as f32;
         let s = sin(t * 0.0017) as f32;
         let s2 = sin(t*0.001) as f32 * 0.2;
-
-        if let Some(last_t) = last_t {
-            // let dif = (t - last_t) as f32;
-            let mut value = current_position.borrow_mut();
-            // *value = quaternion_core::mul(*value, quaternion_core::from_rotation_vector([0.0, 0.0, dif*0.001])).normalize();
-        }
         last_t = Some(t);
 
         let true_center = quaternion_core::point_rotation(quaternion_core::conj(*current_position.borrow()), center);
@@ -207,8 +217,10 @@ pub fn InteractiveDisplay<'a>(cx: Scope<'a>, props: InteractiveDisplayProps<'a>)
               dcm[2][0] * scale_factor, dcm[2][1] * scale_factor, dcm[2][2] * scale_factor]
         );
 
+        let scale = *current_zoom.borrow();
+
         context.uniform3fv_with_f32_array(Some(&offset_location), &[-true_center[0] * scale_factor, -true_center[1]  * scale_factor, -true_center[2]  * scale_factor + 2.0]);
-        context.uniform2fv_with_f32_array(Some(&scale_location), &[1.5 / aspect, 1.5]);
+        context.uniform2fv_with_f32_array(Some(&scale_location), &[scale * 1.5 / aspect, scale * 1.5]);
 
         let progress_value = *progress_value.get();
         let cutoff = bounds.min[2] * (1.0 - progress_value) + bounds.max[2] * progress_value;

@@ -277,7 +277,7 @@ pub fn InteractiveDisplay<'a>(cx: Scope<'a>, props: InteractiveDisplayProps<'a>)
     view! { cx,
         (canvas_view)
         br {}
-        input(type="range", min=0, max=100, value=100, bind:value=slider_value, class=css_style_slider.get_class_name()) {}
+        input(type="range", min=0, max=100, value=100, step=0.01, bind:value=slider_value, class=css_style_slider.get_class_name()) {}
         br {}
         (depth_shown.get())
     }

@@ -57,6 +57,11 @@ pub fn InteractiveDisplay<'a>(cx: Scope<'a>, props: InteractiveDisplayProps<'a>)
         canvas(class=css_style.get_class_name(), width=500, height=500) {}
     };
 
+    let css_style_slider = style! { r#"
+        width: 90vw;
+    "#
+    }.expect("CSS should work");
+
 
     let canvas: web_sys::HtmlCanvasElement = base.inner_element().dyn_into::<web_sys::HtmlCanvasElement>().unwrap();
 
@@ -64,6 +69,9 @@ pub fn InteractiveDisplay<'a>(cx: Scope<'a>, props: InteractiveDisplayProps<'a>)
         .get_context("webgl2").unwrap()
         .unwrap()
         .dyn_into::<WebGl2RenderingContext>().unwrap();
+
+    context.enable(WebGl2RenderingContext::BLEND);
+    context.blend_func(WebGl2RenderingContext::SRC_ALPHA, WebGl2RenderingContext::ONE_MINUS_SRC_ALPHA);
 
     let vert_shader = compile_shader(
         &context,
@@ -73,10 +81,12 @@ pub fn InteractiveDisplay<'a>(cx: Scope<'a>, props: InteractiveDisplayProps<'a>)
         uniform vec3 offset;
         uniform vec2 scale;
         in vec3 position;
+        out float depth;
 
         void main() {
             vec3 true_position = transformation * position + offset;
             gl_Position = vec4(vec3(scale, 0.5) * (transformation * position + offset), true_position.z);
+            depth = position.z;
         }
         "##,
     ).unwrap();
@@ -86,11 +96,16 @@ pub fn InteractiveDisplay<'a>(cx: Scope<'a>, props: InteractiveDisplayProps<'a>)
         WebGl2RenderingContext::FRAGMENT_SHADER,
         r##"#version 300 es
     
+
+
         precision highp float;
+        in float depth;
         out vec4 outColor;
+
+        uniform float depth_cutoff;
         
         void main() {
-            outColor = vec4(1, 1, 1, 1);
+            outColor = vec4(1, 1, 1, depth < depth_cutoff ? 1.0 : 0.1);
         }
         "##,
     ).unwrap();
@@ -101,6 +116,7 @@ pub fn InteractiveDisplay<'a>(cx: Scope<'a>, props: InteractiveDisplayProps<'a>)
     let mat_location = context.get_uniform_location(&program, "transformation").unwrap();
     let offset_location = context.get_uniform_location(&program, "offset").unwrap();
     let scale_location = context.get_uniform_location(&program, "scale").unwrap();
+    let depth_cutoff_location = context.get_uniform_location(&program, "depth_cutoff").unwrap();
 
     let current_position: Rc<RefCell<Quaternion<f32>>> = Rc::new(RefCell::new((0.0, [0.0, 1.0, 0.0])));
 
@@ -124,11 +140,20 @@ pub fn InteractiveDisplay<'a>(cx: Scope<'a>, props: InteractiveDisplayProps<'a>)
 
         mouse_closure.forget();    
     }
+    let slider_value = create_signal(cx, "100".to_string());
 
     let ref_signal = create_rc_signal_from_rc(props.positions.get());
     let ref_signal_copy = ref_signal.clone();
     create_effect(cx, move || ref_signal_copy.set_rc(props.positions.get()));
+    let progress_value = create_rc_signal(100.0);
+    let progress_value_copy = progress_value.clone();
+    create_effect(cx, move || match (*slider_value.get()).parse::<f32>() {
+        Ok(value) => progress_value_copy.set(value * 0.01001 - 0.00001),  // a little more than 1% to make sure 100% is okay
+        _ => ()
+    });
 
+    let depth_shown = create_rc_signal("???".to_string());
+    let depth_shown_copy = depth_shown.clone();
 
     add_loop_callback(move |t| {
         let width = canvas.client_width() as u32;
@@ -185,6 +210,12 @@ pub fn InteractiveDisplay<'a>(cx: Scope<'a>, props: InteractiveDisplayProps<'a>)
         context.uniform3fv_with_f32_array(Some(&offset_location), &[-true_center[0] * scale_factor, -true_center[1]  * scale_factor, -true_center[2]  * scale_factor + 2.0]);
         context.uniform2fv_with_f32_array(Some(&scale_location), &[1.5 / aspect, 1.5]);
 
+        let progress_value = *progress_value.get();
+        let cutoff = bounds.min[2] * (1.0 - progress_value) + bounds.max[2] * progress_value;
+        depth_shown_copy.set(format!("DEPTH: {} mm", cutoff));
+
+        context.uniform1f(Some(&depth_cutoff_location), cutoff);
+
         context.bind_buffer(WebGl2RenderingContext::ARRAY_BUFFER, Some(&buffer));
 
         // Note that `Float32Array::view` is somewhat dangerous (hence the
@@ -230,7 +261,14 @@ pub fn InteractiveDisplay<'a>(cx: Scope<'a>, props: InteractiveDisplayProps<'a>)
     
     });
 
-    View::new_node(base)
+    let canvas_view = View::new_node(base);
+    view! { cx,
+        (canvas_view)
+        br {}
+        input(type="range", min=0, max=100, value=100, bind:value=slider_value, class=css_style_slider.get_class_name()) {}
+        br {}
+        (depth_shown.get())
+    }
 }
 
 #[derive(Prop)]

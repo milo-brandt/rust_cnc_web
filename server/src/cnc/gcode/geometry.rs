@@ -7,9 +7,9 @@ use super::{GCodeCommand, GCodeLine, AxisValues, ArcPlane, GCodeModal, Orientati
 
 fn get_position_from_command<'a>(command: &'a GCodeCommand) -> Option<&'a AxisValues> {
     match command {
-        GCodeCommand::Move { mode, position } => Some(position),
-        GCodeCommand::Probe { position, mode, requirement } => Some(position),
-        GCodeCommand::ArcMove { orientation, position, offsets, revolutions} => Some(position),
+        GCodeCommand::Move { mode: _, position } => Some(position),
+        GCodeCommand::Probe { position, mode: _, requirement: _ } => Some(position),
+        GCodeCommand::ArcMove { orientation: _, position, offsets: _, revolutions: _} => Some(position),
         _ => None
     }
 }
@@ -172,12 +172,12 @@ pub fn as_lines_simple<'a>(program: impl IntoIterator<Item=&'a GCodeLine>, start
             }
         }
         match &gcode.command {
-            Some(GCodeCommand::Move { mode, position }) => {
-                update_position(&mut last_position, position);
+            Some(GCodeCommand::Move { mode: _, position }) => {
+                update_position(&mut last_position, position)?;
                 result.push(map_to_axis_values(&last_position));
             },
-            Some(GCodeCommand::Probe { mode, position, requirement }) => {
-                update_position(&mut last_position, position);
+            Some(GCodeCommand::Probe { mode: _, position, requirement: _ }) => {
+                update_position(&mut last_position, position)?;
                 result.push(map_to_axis_values(&last_position));
             },
             Some(GCodeCommand::ArcMove { orientation, position, offsets, revolutions }) => {
@@ -189,10 +189,6 @@ pub fn as_lines_simple<'a>(program: impl IntoIterator<Item=&'a GCodeLine>, start
                 result.extend(points);                
             }
             _ => (),
-        }
-        let position = gcode.command.as_ref().and_then(get_position_from_command);
-        if let Some(position) = position {
-            result.push(map_to_axis_values(&last_position));
         }
     }
     Ok(result)

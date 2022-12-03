@@ -121,8 +121,6 @@ pub fn InteractiveDisplay<'a>(cx: Scope<'a>, props: InteractiveDisplayProps<'a>)
     let current_position: Rc<RefCell<Quaternion<f32>>> = Rc::new(RefCell::new((0.0, [0.0, 1.0, 0.0])));
     let current_zoom: Rc<RefCell<f32> > = Rc::new(RefCell::new(1.0));
 
-    let mut last_t = None;
-
     {
         let current_position = current_position.clone();
         let mouse_closure: Closure<dyn FnMut(MouseEvent)> = Closure::new(move |value: MouseEvent| {
@@ -171,7 +169,7 @@ pub fn InteractiveDisplay<'a>(cx: Scope<'a>, props: InteractiveDisplayProps<'a>)
     let depth_shown = create_rc_signal("???".to_string());
     let depth_shown_copy = depth_shown.clone();
 
-    add_loop_callback(move |t| {
+    add_loop_callback(move |_| {
         let width = canvas.client_width() as u32;
         let height = canvas.client_height() as u32;
         canvas.set_width(width);
@@ -196,16 +194,11 @@ pub fn InteractiveDisplay<'a>(cx: Scope<'a>, props: InteractiveDisplayProps<'a>)
         log::debug!("{:?} {:?} {}", bounds, center, max_dif);
         let scale_factor = 1.0 / max_dif;
 
-        let mut vertices: Vec<f32> = ref_signal.get().iter().flatten().cloned().collect();
+        let vertices: Vec<f32> = ref_signal.get().iter().flatten().cloned().collect();
 
         let aspect = (width as f32) / (height as f32);
 
-        let c = cos(t * 0.0017) as f32;
-        let s = sin(t * 0.0017) as f32;
-        let s2 = sin(t*0.001) as f32 * 0.2;
-        last_t = Some(t);
-
-        let true_center = quaternion_core::point_rotation((*current_position.borrow()), center);
+        let true_center = quaternion_core::point_rotation(*current_position.borrow(), center);
         
         let dcm = quaternion_core::to_dcm(*current_position.borrow());
 

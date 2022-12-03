@@ -55,6 +55,7 @@ pub enum ImmediateRequest {
     OverrideSpeed(SpeedOverride),
 }
 
+#[allow(unused_variables)]
 #[async_trait(?Send)]
 pub trait Handler {
     // Callbacks; should only include minimal logic here!

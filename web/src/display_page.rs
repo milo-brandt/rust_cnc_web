@@ -129,10 +129,10 @@ pub fn InteractiveDisplay<'a>(cx: Scope<'a>, props: InteractiveDisplayProps<'a>)
             if value.buttons() & 1 == 1 {
                 let x_dif = value.movement_x() as f32 * 0.001;
                 let y_dif = value.movement_y() as f32 * 0.001;
-                let transformation: Quaternion<f32> = quaternion_core::exp([y_dif, x_dif, 0.0]);
+                let transformation: Quaternion<f32> = quaternion_core::exp([-y_dif, -x_dif, 0.0]);
                 if transformation.0 != 1.0 {
                     let mut value = current_position.borrow_mut();
-                    *value = quaternion_core::mul(*value, transformation).normalize();
+                    *value = quaternion_core::mul(transformation, *value).normalize();
                     log::debug!("Multiply by {:?} => {:?}", transformation, value);
                 }
             }
@@ -205,13 +205,13 @@ pub fn InteractiveDisplay<'a>(cx: Scope<'a>, props: InteractiveDisplayProps<'a>)
         let s2 = sin(t*0.001) as f32 * 0.2;
         last_t = Some(t);
 
-        let true_center = quaternion_core::point_rotation(quaternion_core::conj(*current_position.borrow()), center);
+        let true_center = quaternion_core::point_rotation((*current_position.borrow()), center);
         
         let dcm = quaternion_core::to_dcm(*current_position.borrow());
 
         // log::debug!("{:?}", dcm);
 
-        context.uniform_matrix3fv_with_f32_array(Some(&mat_location), false, 
+        context.uniform_matrix3fv_with_f32_array(Some(&mat_location), true, 
             &[dcm[0][0] * scale_factor, dcm[0][1] * scale_factor, dcm[0][2] * scale_factor,
               dcm[1][0] * scale_factor, dcm[1][1] * scale_factor, dcm[1][2] * scale_factor,
               dcm[2][0] * scale_factor, dcm[2][1] * scale_factor, dcm[2][2] * scale_factor]

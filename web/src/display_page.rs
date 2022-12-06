@@ -113,9 +113,10 @@ pub fn InteractiveDisplay<'a>(cx: Scope<'a>, props: InteractiveDisplayProps<'a>)
         out vec4 outColor;
 
         uniform float depth_cutoff;
+        uniform float distance_cutoff;
         
         void main() {
-            outColor = vec4(1, frag_distance, 1, frag_distance < depth_cutoff ? 1.0 : 0.1);
+            outColor = vec4(1, 1, 1, depth < depth_cutoff && frag_distance < distance_cutoff ? 1.0 : 0.1);
         }
         "##,
     ).unwrap();
@@ -128,6 +129,7 @@ pub fn InteractiveDisplay<'a>(cx: Scope<'a>, props: InteractiveDisplayProps<'a>)
     let offset_location = context.get_uniform_location(&program, "offset").unwrap();
     let scale_location = context.get_uniform_location(&program, "scale").unwrap();
     let depth_cutoff_location = context.get_uniform_location(&program, "depth_cutoff").unwrap();
+    let distance_cutoff_location = context.get_uniform_location(&program, "distance_cutoff").unwrap();
 
     let current_position: Rc<RefCell<Quaternion<f32>>> = Rc::new(RefCell::new((0.0, [0.0, 1.0, 0.0])));
     let current_zoom: Rc<RefCell<f32> > = Rc::new(RefCell::new(1.0));
@@ -166,6 +168,7 @@ pub fn InteractiveDisplay<'a>(cx: Scope<'a>, props: InteractiveDisplayProps<'a>)
         closure.forget();
     }
     let slider_value = create_signal(cx, "100".to_string());
+    let time_value = create_signal(cx, "100".to_string());
 
     let ref_signal = create_rc_signal_from_rc(props.positions.get());
     let ref_signal_copy = ref_signal.clone();
@@ -177,8 +180,20 @@ pub fn InteractiveDisplay<'a>(cx: Scope<'a>, props: InteractiveDisplayProps<'a>)
         _ => ()
     });
 
+    let time_progress_value = create_rc_signal(100.0);
+    let time_progress_value_copy = time_progress_value.clone();
+    create_effect(cx, move || match (*time_value.get()).parse::<f32>() {
+        Ok(value) => time_progress_value_copy.set(value * 0.01001 - 0.00001),  // a little more than 1% to make sure 100% is okay
+        _ => ()
+    });
+
+
     let depth_shown = create_rc_signal("???".to_string());
     let depth_shown_copy = depth_shown.clone();
+
+    let time_shown = create_rc_signal("???".to_string());
+    let time_shown_copy = time_shown.clone();
+
 
     add_loop_callback(move |_| {
         let width = canvas.client_width() as u32;
@@ -221,13 +236,13 @@ pub fn InteractiveDisplay<'a>(cx: Scope<'a>, props: InteractiveDisplayProps<'a>)
                 result.push(accumulator as f32);
                 last_position = *position;
             }
-            (result, accumulator)
+            (result, accumulator as f32)
         };
         total_distance += 0.01;
 
         let vertices: Vec<f32> = ref_signal.get().iter()
             .zip(vertex_distances)
-            .flat_map(|(pos, distance)| [pos[0], pos[1], pos[2], distance / (total_distance as f32)])
+            .flat_map(|(pos, distance)| [pos[0], pos[1], pos[2], distance])
             .collect();
 
         let aspect = (width as f32) / (height as f32);
@@ -250,11 +265,15 @@ pub fn InteractiveDisplay<'a>(cx: Scope<'a>, props: InteractiveDisplayProps<'a>)
         context.uniform2fv_with_f32_array(Some(&scale_location), &[scale * 1.5 / aspect, scale * 1.5]);
 
         let progress_value = *progress_value.get();
-        let cutoff = progress_value;
-        //let cutoff = bounds.min[2] * (1.0 - progress_value) + bounds.max[2] * progress_value;
-        depth_shown_copy.set(format!("DEPTH: {} mm", cutoff));
+        let cutoff = bounds.min[2] * (1.0 - progress_value) + bounds.max[2] * progress_value;
+        depth_shown_copy.set(format!("{} mm", cutoff));
+
+        let time_value = *time_progress_value.get();
+        let time_cutoff = time_value * total_distance;
+        time_shown_copy.set(format!("{} mm", time_cutoff));
 
         context.uniform1f(Some(&depth_cutoff_location), cutoff);
+        context.uniform1f(Some(&distance_cutoff_location), time_cutoff);
 
         context.bind_buffer(WebGl2RenderingContext::ARRAY_BUFFER, Some(&buffer));
 
@@ -312,13 +331,18 @@ pub fn InteractiveDisplay<'a>(cx: Scope<'a>, props: InteractiveDisplayProps<'a>)
     
     });
 
+    let slider_class = create_ref(cx, css_style_slider.get_class_name().to_string());
     let canvas_view = View::new_node(base);
     view! { cx,
         (canvas_view)
         br {}
-        input(type="range", min=0, max=100, value=100, step=0.01, bind:value=slider_value, class=css_style_slider.get_class_name()) {}
+        input(type="range", min=0, max=100, value=100, step=0.01, bind:value=slider_value, class=slider_class) {}
         br {}
-        (depth_shown.get())
+        "Showing depth below: " (depth_shown.get())
+        br {}
+        input(type="range", min=0, max=100, value=100, step=0.01, bind:value=time_value, class=slider_class) {}
+        br {}
+        "Show travel up to: " (time_shown.get())
     }
 }
 

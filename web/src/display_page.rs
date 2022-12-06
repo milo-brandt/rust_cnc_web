@@ -45,6 +45,10 @@ fn center_of(r: &MinMax) -> [f32; 3] {
     ]
 }
 
+pub fn distance(a: &[f32; 3], b: &[f32; 3]) -> f32 {
+    ((a[0]-b[0])*(a[0]-b[0]) + (a[1]-b[1])*(a[1]-b[1]) + (a[2]-b[2])*(a[2]-b[2])).sqrt()
+}
+
 #[component]
 pub fn InteractiveDisplay<'a>(cx: Scope<'a>, props: InteractiveDisplayProps<'a>) -> View<DomNode> {
     let css_style = style! { r#"
@@ -80,13 +84,18 @@ pub fn InteractiveDisplay<'a>(cx: Scope<'a>, props: InteractiveDisplayProps<'a>)
         uniform mat3x3 transformation;
         uniform vec3 offset;
         uniform vec2 scale;
+
         in vec3 position;
+        in float distance;
+
         out float depth;
+        out float frag_distance;
 
         void main() {
             vec3 true_position = transformation * position + offset;
             gl_Position = vec4(vec3(scale, 0.5) * (transformation * position + offset), true_position.z);
             depth = position.z;
+            frag_distance = distance;
         }
         "##,
     ).unwrap();
@@ -100,17 +109,19 @@ pub fn InteractiveDisplay<'a>(cx: Scope<'a>, props: InteractiveDisplayProps<'a>)
 
         precision highp float;
         in float depth;
+        in float frag_distance;
         out vec4 outColor;
 
         uniform float depth_cutoff;
         
         void main() {
-            outColor = vec4(1, 1, 1, depth < depth_cutoff ? 1.0 : 0.1);
+            outColor = vec4(1, frag_distance, 1, frag_distance < depth_cutoff ? 1.0 : 0.1);
         }
         "##,
     ).unwrap();
     let program = link_program(&context, &vert_shader, &frag_shader).unwrap();
     let position_attribute_location = context.get_attrib_location(&program, "position");
+    let distance_attribute_location = context.get_attrib_location(&program, "distance");
     let buffer = context.create_buffer().ok_or("Failed to create buffer").unwrap();
 
     let mat_location = context.get_uniform_location(&program, "transformation").unwrap();
@@ -191,10 +202,33 @@ pub fn InteractiveDisplay<'a>(cx: Scope<'a>, props: InteractiveDisplayProps<'a>)
 
         let max_dif = max_bounds_of(&bounds).max(0.001);
         let center = center_of(&bounds);
-        log::debug!("{:?} {:?} {}", bounds, center, max_dif);
+        // log::debug!("{:?} {:?} {}", bounds, center, max_dif);
         let scale_factor = 1.0 / max_dif;
 
-        let vertices: Vec<f32> = ref_signal.get().iter().flatten().cloned().collect();
+        let (vertex_distances, mut total_distance) = 'vertex_distances: {
+            let vec = ref_signal.get();
+            let mut iterator = vec.iter();
+            let mut result = Vec::new();
+            let mut last_position = match iterator.next() {
+                Some(position) => *position,
+                None => break 'vertex_distances (result, 0.0)
+            };
+            let mut accumulator = 0.0;
+            result.push(0.0);
+            for position in iterator {
+                let distance = distance(&last_position, position);
+                accumulator += distance as f64;
+                result.push(accumulator as f32);
+                last_position = *position;
+            }
+            (result, accumulator)
+        };
+        total_distance += 0.01;
+
+        let vertices: Vec<f32> = ref_signal.get().iter()
+            .zip(vertex_distances)
+            .flat_map(|(pos, distance)| [pos[0], pos[1], pos[2], distance / (total_distance as f32)])
+            .collect();
 
         let aspect = (width as f32) / (height as f32);
 
@@ -216,7 +250,8 @@ pub fn InteractiveDisplay<'a>(cx: Scope<'a>, props: InteractiveDisplayProps<'a>)
         context.uniform2fv_with_f32_array(Some(&scale_location), &[scale * 1.5 / aspect, scale * 1.5]);
 
         let progress_value = *progress_value.get();
-        let cutoff = bounds.min[2] * (1.0 - progress_value) + bounds.max[2] * progress_value;
+        let cutoff = progress_value;
+        //let cutoff = bounds.min[2] * (1.0 - progress_value) + bounds.max[2] * progress_value;
         depth_shown_copy.set(format!("DEPTH: {} mm", cutoff));
 
         context.uniform1f(Some(&depth_cutoff_location), cutoff);
@@ -241,6 +276,8 @@ pub fn InteractiveDisplay<'a>(cx: Scope<'a>, props: InteractiveDisplayProps<'a>)
             );
         }
 
+        //log::debug!("LOOPING!");
+
         let vao = context
             .create_vertex_array()
             .ok_or("Could not create vertex array object").unwrap();
@@ -251,14 +288,23 @@ pub fn InteractiveDisplay<'a>(cx: Scope<'a>, props: InteractiveDisplayProps<'a>)
             3,
             WebGl2RenderingContext::FLOAT,
             false,
-            0,
+            4 * 4,
             0,
         );
+        context.vertex_attrib_pointer_with_i32(
+            distance_attribute_location as u32,
+            1,
+            WebGl2RenderingContext::FLOAT,
+            false,
+            4 * 4,
+            3 * 4,
+        );
         context.enable_vertex_attrib_array(position_attribute_location as u32);
+        context.enable_vertex_attrib_array(distance_attribute_location as u32);
 
         context.bind_vertex_array(Some(&vao));
 
-        let vert_count = (vertices.len() / 3) as i32;
+        let vert_count = (vertices.len() / 4) as i32;
         context.clear_color(0.0, 0.0, 0.0, 1.0);
         context.clear(WebGl2RenderingContext::COLOR_BUFFER_BIT);
     

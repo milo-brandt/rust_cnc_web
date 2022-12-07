@@ -2,14 +2,19 @@ from typing import NamedTuple
 from matplotlib.path import Path
 from matplotlib.patches import PathPatch
 from shapely.geometry.polygon import orient
-from shapely.geometry import Polygon, Point, MultiPoint, LineString, MultiPolygon, MultiLineString
+from shapely.geometry import Polygon, Point, MultiPoint, LineString, MultiPolygon, MultiLineString, GeometryCollection
+import matplotlib.pyplot as plt
 
 ###
 # Display for debugging...
 ###
 
-def plot_line_string(ax, line_string, **kwargs):
-    ax.plot(*line_string, **kwargs)
+def plot_list_of_points(ax, list_of_points, **kwargs):
+    ax.plot([
+        pt[0] for pt in list_of_points
+    ], [
+        pt[1] for pt in list_of_points
+    ], **kwargs)
 
 def plot_polygon(ax, poly, **kwargs):
     path = Path.make_compound_path(
@@ -31,7 +36,7 @@ def plot_polygon(ax, poly, **kwargs):
 def as_geo_list(poly):
     if hasattr(poly, 'geoms'):
         return list(poly.geoms)
-    elif len(poly.exterior.coords) > 0:
+    elif not poly.is_empty:
         return [poly]
     else:
         return []
@@ -40,7 +45,7 @@ def as_line_string_list(poly):
     return [
         geo
         for geo in as_geo_list(poly)
-        if geo.geom_type == "LineString"
+        if geo.geom_type == "LineString" or geo.geom_type == "LinearRing"
     ]
 
 def as_poly_list(poly):
@@ -55,133 +60,100 @@ def as_poly_list(poly):
 # Basically cuts up shapes like onions...
 ###
 
-class OffsetLevels(NamedTuple):
-    # Returns levels ordered from smallest to biggest
-    levels: "list[list[Polygon]]"
-
-class OffsetGraphNode(NamedTuple):
-    line_string: "LineString"
-    is_hole: "bool"
-    requirements: "list[OffsetGraphNode]"
-
-class OffsetGraph(NamedTuple):
-    nodes: "list[OffsetGraphNode]"
-
-def offset_polygon_levels_for(poly, offset_amount):
-    # poly can be a polygon or compound
+def offset_polygon_levels_for(shape, offset_amount, min_shape=None) -> "list[Polygon]":
+    # Repeatedly compute offsets of shape by offset_amount until the resulting region is 
+    # either empty or, if specified, a subset of min_shape.
     levels = []
     offset_total = 0
     while True:
+        next_shape = shape.buffer(-offset_total)
         next_level = [
             orient(candidate)
-            for candidate as_poly_list(poly.buffer(-offset_total))
+            for candidate in as_poly_list(next_shape)
         ]
-        if len(next_level) > 0:
-            ret.append(next_level)
+        if len(next_level) > 0 and (min_shape is None or not min_shape.contains(next_shape)):
+            levels.append(next_level)
             offset_total += offset_amount
         else:
-            return OffsetLevels(levels=reversed(levels))  # Reverse so it goes smallest to biggest.
+            return list(reversed(levels))  # Reverse so it goes smallest to biggest.
 
-def offset_graph_for(poly, offset_amount):
-    offset_levels = offset_polygon_levels_for(poly, offset_amount)
-    total_nodes = []
-    prior_nodes = []
-    for level in offset_levels.levels:
-        next_nodes = []
-        for polygon in level:
-            next_nodes.append(OffsetGraphNode(
-                line_string=polygon.exterior,
-                is_hole=False,
-                requirements=[
-                    node
-                    for node in prior_nodes
-                    if polygon.contains(Point(*node.line_string.coords[0]))
-                ],
-            ))
-            for hole in polygon.interiors:
-                point_in_hole = Point(*hole.coords[0])
-                next_nodes.append(OffsetGraphNode(
-                    line_string=hole,
-                    is_hole=True,
-                    requirements=[
-                        node
-                        for node in prior_nodes
-                        if node.is_hole and Polygon(node.line_string.coords).contains(point_in_hole)
-                    ],
-                ))
-        # Sanity check:
-        required_prior_nodes = set()
-        for node in next_nodes:
-            for requirement in node.requirements:
-                required_prior_nodes.add(requirement)
-        if required_prior_nodes != set(prior_nodes):
-            raise RuntimeError("Not all prior nodes were required!")
-        # Prepare for next level
-        total_nodes += next_nodes
-        prior_nodes = total_nodes
-    return OffsetGraph(nodes=total_nodes)
+# Given...
+#   region: The total region around which to move the tool; the boundary will definitely be traversed.
+#   offset_amount: how frequently to include inner paths
+#   exclusion_region: a region not to move the tool in (e.g. to represen already-cut portions)
+#
+# Returns a possible sequence of cuts to make. Not very smart - always repositions between successive cuts.
+def path_for_shape(shape, offset_amount, exclusion_region=None):
+    levels = offset_polygon_levels_for(shape, offset_amount, exclusion_region)
+    paths = []
+    for level in levels:
+        paths += [
+            list(line_string.coords)
+            for polygon in level
+            for line_string in as_line_string_list(
+                polygon.boundary.difference(exclusion_region)
+                if exclusion_region is not None
+                else polygon.boundary
+            )
+        ]
+    return paths
 
-# Really, there are two relations: which are safe paths from a given place + which should be done earlier
+def get_depth_list(z_max, z_min, z_step):
+    depth = z_max - z_step
+    depth_list = []
+    while depth > z_min:
+        depth_list.append(depth)
+        depth -= z_step
+    depth_list.append(z_min)
+    return depth_list
+
+def stroke_paths_to_depth(paths, *, z_max, z_min, z_step):
+    # Given a list of paths in 2D, create a list of paths in 3D.
+    return [
+        [(x, y, z) for x, y in path]
+        for z in get_depth_list(z_max, z_min, z_step)
+        for path in paths
+    ]
 
 
-###
-# Utilites for converting offset trees to paths...
-###
+def plot_paths(list_of_list):
+    fig, ax = plt.subplots()
+    for line_string in list_of_list:
+        plot_list_of_points(ax, line_string)
+    fig.show()
 
-def cut_line_string(line, distance):
-    # Cut a linestring into two line strings at the specified distance from the start.
-    # Returns an array of 1 or 2 lines, starting with the one up to the cut if there are 2.
-    if distance <= 0.0 or distance >= line.length:
-        return [LineString(line)]
-    coords = list(line.coords)
-    for i, p in enumerate(coords):
-        pd = line.project(Point(p))
-        if pd == distance:
-            return [
-                LineString(coords[:i+1]),
-                LineString(coords[i:])]
-        if pd > distance:
-            cp = line.interpolate(distance)
-            return [
-                LineString(coords[:i] + [(cp.x, cp.y)]),
-                LineString([(cp.x, cp.y)] + coords[i:])]
-    return [LineString(line)]
 
-def almost_equal(c1, c2):
-    return (c1[0] - c2[0])** 2 + (c1[1] - c2[1]) ** 2 < 0.0000000000001
+def approx_equal(x, y):
+    dif = x - y
+    return -0.001 < dif and dif < 0.001
 
-def reposition_line_cycle(line_cycle, distance):
-    # Move the start of a line cycle to start instead at a given distance from the current start.
-    if not almost_equal(line_cycle.coords[-1], line_cycle.coords[0]):
-        raise RuntimeError("Line cycle is not cycle!")
-    cut = cut_line_string(line_cycle, distance)
-    if len(cut) == 2:
-        cut = list(cut[1].coords) + list(cut[0].coords[1:])
-    else:
-        cut = list(cut[0].coords)
-    return cut
+def approx_equal_tuples(x, y):
+    return all(approx_equal(a, b) for a, b in zip(x, y))
 
-def get_index_with_distance_multiline(line_string_list, distance):
-    total = 0
-    for index, line in enumerate(line_string_list):
-        previous_total = total
-        total += line.length
-        if total >= distance:
-            return index, distance - previous_total
-    raise RuntimeError("Distance was too great!")
+def paths_to_gcode(paths, feedrate, safe_height):
+    last_position = (-1434634, -12342345) # Random numbers, hopefully not equal to anything
+    code = ""
+    for path in paths:
+        if len(path) == 0:
+            continue
+        first_point = path[0]
+        if not approx_equal_tuples(last_position, first_point[0:2]):
+            code += f"G0 Z{safe_height}\nG0 X{path[0][0]:.2f} Y{path[0][1]:.2f}\n"
+        code += "\n".join([f"G1 X{x:.2f} Y{y:.2f} Z{z:.2f} F{feedrate:.2f}" for x,y,z in path])
+        code += "\n"
+        last_position = path[-1][0:2]
+    code += f"G0 Z{safe_height}"
+    return code
 
-def offset_tree_to_paths(tree):
-    final_paths = []
-    for child in tree.children:
-        final_paths += offset_tree_to_paths(child)
-    exteriors = as_geo_list(tree.outer.boundary)
-    if len(final_paths) > 0:
-        # Find closest point in the most recent path and continue from there
-        closest_pt_distance = tree.outer.boundary.project(Point(*final_paths[-1][-1]))
-        index, distance = get_index_with_distance_multiline(exteriors, closest_pt_distance)
-        split_path = exteriors[index]
-        del exteriors[index]
-        final_paths[-1] += reposition_line_cycle(split_path, closest_pt_distance)
-    for exterior in exteriors:  # exludes anything handled above...
-        final_paths = [list(exterior.coords)]
-    return final_paths
+def shape_to_gcode(*, shape, inset, stepover, z_max, z_min, z_step, safe_height, feedrate, exclusion_region=None):
+    paths = path_for_shape(shape.buffer(-inset), stepover, exclusion_region)
+    plot_paths(paths)
+    return paths_to_gcode(
+        paths=stroke_paths_to_depth(paths, z_max=z_max, z_min=z_min, z_step=z_step),
+        feedrate=feedrate,
+        safe_height=safe_height,
+    )
+
+
+shape = Polygon([(0, 0), (16, 0), (16, 16), (0, 16)])
+inner_shape = Polygon([(0.4, 0.4), (0.5, 0.5), (0.6, 0.4)])

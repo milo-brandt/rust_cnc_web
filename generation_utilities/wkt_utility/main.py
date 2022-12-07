@@ -160,9 +160,49 @@ wkts = [wkt_loads(item["wkt"]) for item in wkt_json]
 radius = 0.025 * 25.4 * 0.5
 
 cuts = create_chosen_cuts(cut_list=wkts, radius=radius)
-show_polys(cuts)
-show_polys([union_of_list(cuts)])
+# show_polys(cuts)
+# show_polys([union_of_list(cuts)])
 
+import gcode_generator
+
+safety_amount = 25.4/80
+
+for i, cut in enumerate(cuts):
+    with open(f"eighth_inch_cut_{i}.nc", 'w') as f:
+        f.write(
+            gcode_generator.shape_to_gcode(
+                shape=cut.buffer(-25.4/16 - safety_amount),
+                inset=25.4/16,
+                stepover=25.4/16,
+                z_max=0,
+                z_min=-3,
+                z_step=1,
+                safe_height=5,
+                feedrate=1000,
+            )
+        )
+    with open(f"fourtieth_inch_cut_{i}.nc", 'w') as f:
+        already_cut = cut.buffer(-25.4)
+        show_polys([
+            cut.buffer(-25.4/80),
+            cut.buffer(-25.4/16 - safety_amount).buffer(25.4/16 - 25.4/80),
+        ])
+        f.write(
+            gcode_generator.shape_to_gcode(
+                shape=cut.buffer(-25.4/80),
+                exclusion_region=cut.buffer(-25.4/16 - safety_amount).buffer(25.4/16 - 25.4/35),  # What was cut before unbuffered by new tool radius
+                inset=25.4/80,
+                stepover=25.4/80,
+                z_max=0,
+                z_min=-3,
+                z_step=0.301,
+                safe_height=5,
+                feedrate=1000,
+            )
+        )
+
+
+input("...")
 # final_background, remaining = to_bicuttable(
 #     primary=background,
 #     secondary=union_of_list(wkts[1:]).buffer(0.001),

@@ -4,17 +4,10 @@ from matplotlib.patches import PathPatch
 from matplotlib.collections import PatchCollection
 from shapely.geometry import Polygon
 import matplotlib.pyplot as plt
-import csv
+import json
 from shapely import wkt
 from shapely.validation import make_valid  # Seems we get bowties sometimes. Not sure why?
-# This utility here can convert svg -> wkt.
-# Closed source but oh well https://mygeodata.cloud/converter/svg-to-wkt
-# Can only convert 3 things per month, haha. It's not that hard to do this, though...
-
-def wkts_from_csv(path):
-    csv.field_size_limit(1000000000)
-    with open(path) as f:
-        return [line[0] for line in csv.reader(f)][1:]
+from shapely.geometry import GeometryCollection, box
 
 # Plots a Polygon to pyplot `ax`
 def plot_polygon(ax, poly, **kwargs):
@@ -47,13 +40,20 @@ def show_wkt(wkt_input):
         plot_polygon(ax, polygon, facecolor='lightblue', edgecolor='red')
     fig.show()
 
-def as_poly_list(poly):
+def as_geo_list(poly):
     if hasattr(poly, 'geoms'):
         return list(poly.geoms)
     elif len(poly.exterior.coords) > 0:
         return [poly]
     else:
         return []
+
+def as_poly_list(poly):
+    return [
+        geo
+        for geo in as_geo_list(poly)
+        if geo.geom_type == "Polygon"
+    ]
 
 def show_polys(polys):
     fig, ax = plt.subplots()
@@ -70,29 +70,83 @@ def show_wkts(wkt_inputs):
             plot_polygon(ax, polygon, facecolor=colors[i%len(colors)], edgecolor='red')
     fig.show()
 
-def cuttable(*, to_cut, to_avoid, radius):
+def allowed_cutter_positions(*, to_cut, to_avoid, radius):
     # Consider resolution parameter here...
-    productive_locations = to_avoid.buffer(radius)
-    forbidden_locations = to_cut.buffer(radius)
+    productive_locations = to_cut.buffer(radius)
+    forbidden_locations = to_avoid.buffer(radius)
     return productive_locations.difference(forbidden_locations)
 
-def expand_to_bicuttable(*, to_cut, to_avoid, radius):
-    return cuttable(to_cut, cuttable(to_avoid, to_cut, radius), radius)
-
-def refine_to_bicuttable(*, to_cut, to_avoid, radius):
-    return cuttable(to_cut, expand_to_bicuttable(to_avoid, to_cut, radius), radius)
+def cut_avoiding(*, to_cut, to_avoid, radius):
+    return allowed_cutter_positions(to_cut=to_cut, to_avoid=to_avoid, radius=radius).buffer(radius)
 
 def wkt_loads(s):
     return make_valid(wkt.loads(s))
+
+def union_of_list(l):
+    if len(l) == 0:
+        return GeometryCollection()
+    total = l[0]
+    for item in l[1:]:
+        total = total.union(item)
+    return total
+
+def to_bicuttable(*, primary, secondary, radius):
+    # Return a pair of disjoint radius-cuttable sets close to primary and secondary.
+    # Will check that the result contains at least primary + secondary.
+    # Prefers to enlarge primary where possible.
+
+    total = primary.union(secondary).buffer(0.001).buffer(-0.001)  # Buffer make sure to merge close lines.
+    # First: Calculate what subset of secondary can be cut without hitting primary.
+    inner_secondary = cut_avoiding(to_cut=secondary, to_avoid=primary, radius=radius).intersection(total)
+    # Then, calculate what of primary can be cut avoiding just the cuttable parts of secondary above.
+    # This should have a suitably smooth edge, as it "presses" circles up against the boundary of inner_secondary, which must
+    # also have circular arcs where it is convex.
+    enlarged_primary = cut_avoiding(to_cut=primary, to_avoid=inner_secondary, radius=radius)
+
+    mating_secondary = cut_avoiding(to_cut=secondary, to_avoid=enlarged_primary.intersection(total), radius=radius)
+
+    if not enlarged_primary.union(mating_secondary).buffer(0.01).contains(total):
+        raise RuntimeError(
+            "Bicuttable region did not contain the original total region. "
+            "This can happen where a single point has many components of both primary and secondary "
+            "nearby - for instance, if alternating quadrants were in alternating regions. "
+            "This could be developed around if needed by looking at the difference and arbitrarily "
+            "adding paths to one or the other through such conflicted points."
+        )
+    
+    return (enlarged_primary, mating_secondary)
+
+def create_chosen_cuts(*, cut_list, radius):
+    safe_parts = [
+        to_bicuttable(
+            primary=cut_list[i],
+            secondary=union_of_list(cut_list[i+1:]).buffer(0.001),
+            radius=radius
+        )[0]
+        for i in range(len(cut_list))
+    ]
+    final_parts = [
+        safe_parts[i].difference(union_of_list(safe_parts[:i]))
+        for i in range(len(safe_parts))
+    ]
+    return final_parts
+
+
+
+
+# def cut_sequence(extent, cuts):
+    #for i in range(len(cuts)):
+        
+
+#     box()
 
 ###
 # Particular script...
 ###
 
-# wkt_lines = wkts_from_csv("/home/milo/Documents/Modelling/CuttingBoard/separated.csv")
+wkt_json = json.load(open("../../svg2wkt/practice_plain.json"))
+wkts = [wkt_loads(item["wkt"]) for item in wkt_json]
 
-# # Add a miniscule buffer to make everyone less complain-y
-# wkts = [wkt.loads(item) for item in wkt_lines]
 # background = wkts[0]
 # trunk = wkts[1]
 # leaf = wkts[2]
@@ -102,3 +156,46 @@ def wkt_loads(s):
 # #nonback = leaf.union(canopy).union(trunk).union(wind)
 # #show_polys([background, nonback])
 # show_polys(wkts)
+
+radius = 0.025 * 25.4 * 0.5
+
+cuts = create_chosen_cuts(cut_list=wkts, radius=radius)
+show_polys(cuts)
+show_polys([union_of_list(cuts)])
+
+# final_background, remaining = to_bicuttable(
+#     primary=background,
+#     secondary=union_of_list(wkts[1:]).buffer(0.001),
+#     radius=radius
+# )
+# show_polys([final_background, remaining])
+# final_trunk, remaining = to_bicuttable(
+#     primary=trunk,
+#     secondary=union_of_list(wkts[2:]).buffer(0.001),
+#     radius=radius
+# )
+# show_polys([final_trunk, remaining])
+# final_leaf, remaining = to_bicuttable(
+#     primary=leaf,
+#     secondary=union_of_list(wkts[3:]).buffer(0.001),
+#     radius=radius
+# )
+# show_polys([final_leaf, remaining])
+# final_wind, final_canopy = to_bicuttable(
+#     primary=wind,
+#     secondary=union_of_list(wkts[4:]).buffer(0.001),
+#     radius=radius
+# )
+# show_polys([final_wind, final_canopy])
+
+
+# final_trunk = final_trunk.difference(final_background)
+# final_leaf = final_leaf.difference(final_background).difference(final_trunk)
+# final_wind = final_wind.difference(final_background).difference(final_trunk).difference(final_leaf)
+# final_canopy = final_canopy.difference(final_background).difference(final_trunk).difference(final_leaf).difference(final_wind)
+
+# final_pieces = [final_background, final_trunk, final_leaf, final_wind, final_canopy]
+
+# show_polys([final_background, final_trunk, final_leaf, final_wind, final_canopy])
+
+# show_polys([union_of_list(final_pieces).buffer(0.001)])

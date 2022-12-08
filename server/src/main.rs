@@ -482,5 +482,6 @@ async fn get_gcode_list() -> Json<Vec<String>> {
     while let Some(entry) = entries.next_entry().await.unwrap() {
         values.push(entry.file_name().into_string().unwrap());
     }
+    values.sort();
     Json(values)
 }

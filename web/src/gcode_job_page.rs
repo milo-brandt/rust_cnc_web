@@ -52,11 +52,19 @@ pub fn GcodeFile<'a, F: Fn() -> () + 'a>(cx: Scope<'a>, props: GcodeFileProps<'a
         });
     });
     view! { cx,
-        div(class="gcode_line") {
-            (name.clone()) " "
-            button(on:click=run_callback, disabled=!*props.can_send_job.get()) { "Run!" }
-            button(on:click=delete_callback, disabled=!*props.can_send_job.get()) { "Delete!" }
-            a(href=format!("/view/{}", name)) { "View!" }
+        tr(class="gcode_line") {
+            td {
+                (name.clone()) " "
+            }
+            td {
+                button(on:click=run_callback, disabled=!*props.can_send_job.get()) { "Run!" }
+            }
+            td {
+                button(on:click=delete_callback, disabled=!*props.can_send_job.get()) { "Delete!" }
+            }
+            td {
+                a(href=format!("/view/{}", name)) { "View!" }
+            }
         }
     }
 }
@@ -126,12 +134,14 @@ pub fn GCodePage(cx: Scope) -> View<DomNode> {
             let list = create_memo(cx, move || (*list.get()).clone().unwrap_or(Vec::new()));
             view! { cx, 
                 div(class="debug_page") {
-                    Indexed(
-                        iterable=list,
-                        view=move |cx, x| view! { cx,
-                            GcodeFile(name=x, can_send_job=global_info.is_idle, on_delete=move || spawn_local_scoped(cx, get_list()))
-                        }
-                    )
+                    table {
+                        Indexed(
+                            iterable=list,
+                            view=move |cx, x| view! { cx,
+                                GcodeFile(name=x, can_send_job=global_info.is_idle, on_delete=move || spawn_local_scoped(cx, get_list()))
+                            }
+                        )
+                    }
                 }
             }
         })

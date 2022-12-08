@@ -15,7 +15,7 @@ pub struct InteractiveDisplayProps<'a> {
     positions: &'a ReadSignal<Vec<[f32; 3]>>
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 struct MinMax {
     min: [f32; 3],
     max: [f32; 3],
@@ -194,6 +194,8 @@ pub fn InteractiveDisplay<'a>(cx: Scope<'a>, props: InteractiveDisplayProps<'a>)
     let time_shown = create_rc_signal("???".to_string());
     let time_shown_copy = time_shown.clone();
 
+    let bounds_signal = create_rc_signal(None);
+    let bounds_signal_copy = bounds_signal.clone();
 
     add_loop_callback(move |_| {
         let width = canvas.client_width() as u32;
@@ -214,6 +216,10 @@ pub fn InteractiveDisplay<'a>(cx: Scope<'a>, props: InteractiveDisplayProps<'a>)
         }
         let first = vertices_vec[0];
         let bounds = vertices_vec.iter().fold(MinMax{ min: first, max: first }, enlarge_to);
+
+        log::debug!("{:?}", bounds);
+        
+        bounds_signal_copy.set(Some(bounds.clone()));
 
         let max_dif = max_bounds_of(&bounds).max(0.001);
         let center = center_of(&bounds);
@@ -333,6 +339,18 @@ pub fn InteractiveDisplay<'a>(cx: Scope<'a>, props: InteractiveDisplayProps<'a>)
 
     let slider_class = create_ref(cx, css_style_slider.get_class_name().to_string());
     let canvas_view = View::new_node(base);
+    let x_bounds = {
+        let bounds_signal = bounds_signal.clone();
+        create_selector(cx, move || (*bounds_signal.get()).as_ref().map_or("???".to_string(), |bounds| format!("{} to {}", bounds.min[0], bounds.max[0])))
+    };
+    let y_bounds = {
+        let bounds_signal = bounds_signal.clone();
+        create_selector(cx, move || (*bounds_signal.get()).as_ref().map_or("???".to_string(), |bounds| format!("{} to {}", bounds.min[1], bounds.max[1])))
+    };
+    let z_bounds = {
+        let bounds_signal = bounds_signal.clone();
+        create_selector(cx, move || (*bounds_signal.get()).as_ref().map_or("???".to_string(), |bounds| format!("{} to {}", bounds.min[2], bounds.max[2])))
+    };
     view! { cx,
         (canvas_view)
         br {}
@@ -343,6 +361,14 @@ pub fn InteractiveDisplay<'a>(cx: Scope<'a>, props: InteractiveDisplayProps<'a>)
         input(type="range", min=0, max=100, value=100, step=0.01, bind:value=time_value, class=slider_class) {}
         br {}
         "Show travel up to: " (time_shown.get())
+        br {}
+        "X bounds: " (x_bounds.get()) 
+        br {}
+        "Y bounds: " (y_bounds.get()) 
+        br {}
+        "Z bounds: " (z_bounds.get()) 
+        br {}
+
     }
 }
 

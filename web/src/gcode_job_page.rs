@@ -79,22 +79,32 @@ pub struct GCodeUploadProps<F: Fn() -> ()> {
 pub fn GCodeUpload<'a, F: Fn() -> () + 'a>(cx: Scope<'a>, props: GCodeUploadProps<F>) -> View<DomNode> {
     let node_ref = create_node_ref(cx);
     let on_upload = create_ref(cx, props.on_upload);
+    let is_uploading = create_signal(cx, false);
     let run_callback = create_ref(cx, move |_| {
         spawn_local_scoped(cx, async move {
             log::debug!("uploading!");
             log::debug!("{:?}", node_ref);
-            let node: DomNode = node_ref.get();
+            let node: Option<DomNode> = node_ref.try_get();
+            let node = match node {
+                Some(node) => node,
+                None => {
+                    log::debug!("No upload node!");
+                    return
+                }
+            };
             let input_node: HtmlInputElement = node.unchecked_into();
             if let Some(file) = input_node.files().and_then(|files| files.item(0)) {
                 log::debug!("{:?} {}", file, file.name());
                 let form_data = FormData::new().unwrap();
                 form_data.append_with_str("filename", &file.name()).unwrap();
                 form_data.append_with_blob_and_filename("file", &file, "filename.nc").unwrap();
+                is_uploading.set(true);
                 let result = request::request_with_body(
                     HttpMethod::Post, 
                     api::UPLOAD_GCODE_FILE, 
                     form_data,
                 ).await;
+                is_uploading.set(false);
                 log::debug!("Result: {:?}", result);
                 on_upload()
             }
@@ -102,8 +112,14 @@ pub fn GCodeUpload<'a, F: Fn() -> () + 'a>(cx: Scope<'a>, props: GCodeUploadProp
         });
     });
     view! { cx,
-        input(ref=node_ref, type="file") {} br{}
-        button(on:click=run_callback) { "Upload" }
+        (if !*is_uploading.get() {
+            view! { cx, 
+                input(ref=node_ref, type="file") {} br{}
+                button(on:click=run_callback) { "Upload" }
+            }
+        } else {
+            view!{ cx, "Uploading..." }
+        })
     }
 }
 

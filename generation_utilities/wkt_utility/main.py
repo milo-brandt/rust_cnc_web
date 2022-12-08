@@ -162,16 +162,27 @@ radius = 0.025 * 25.4 * 0.5
 cuts = create_chosen_cuts(cut_list=wkts, radius=radius)
 # show_polys(cuts)
 # show_polys([union_of_list(cuts)])
+total = union_of_list(cuts)
 
 import gcode_generator
 
-safety_amount = 25.4/80
+safety_amount = 25.4/60
 
 for i, cut in enumerate(cuts):
     with open(f"eighth_inch_cut_{i}.nc", 'w') as f:
         f.write(
             gcode_generator.shape_to_gcode(
-                shape=cut.buffer(-25.4/16 - safety_amount),
+                shape=total.difference(cut),
+                inset=0,
+                stepover=25.4/16,
+                z_max=0,
+                z_min=0,
+                z_step=1,
+                safe_height=5,
+                feedrate=1000,
+            ) + "\n" +
+            gcode_generator.shape_to_gcode(
+                shape=cut.buffer(-safety_amount),
                 inset=25.4/16,
                 stepover=25.4/16,
                 z_max=0,
@@ -189,13 +200,13 @@ for i, cut in enumerate(cuts):
         ])
         f.write(
             gcode_generator.shape_to_gcode(
-                shape=cut.buffer(-25.4/80),
-                exclusion_region=cut.buffer(-25.4/16 - safety_amount).buffer(25.4/16 - 25.4/35),  # What was cut before unbuffered by new tool radius
+                shape=cut,
+                exclusion_region=cut.buffer(-25.4/16 - safety_amount).buffer(25.4/16),  # What was cut before unbuffered by new tool radius
                 inset=25.4/80,
                 stepover=25.4/80,
                 z_max=0,
                 z_min=-3,
-                z_step=0.301,
+                z_step=0.501,
                 safe_height=5,
                 feedrate=1000,
             )

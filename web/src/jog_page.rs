@@ -76,7 +76,7 @@ pub fn JogPage(cx: Scope) -> View<DomNode> {
     }.expect("CSS should work");
     log::debug!("Jog CSS class: {}", css_style.get_class_name());
     let value = create_signal(cx, "100.00".to_string());
-    let amt = create_signal(cx, 100.0); //parse_f64_signal(cx, value);
+    let amt = parse_f64_signal(cx, value);
     let valuez = create_signal(cx, "10.00".to_string());
     let amtz = parse_f64_signal(cx, valuez);
     view! { cx, 

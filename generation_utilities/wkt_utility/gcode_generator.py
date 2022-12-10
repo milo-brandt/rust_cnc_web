@@ -66,7 +66,7 @@ def offset_polygon_levels_for(shape, offset_amount, min_shape=None) -> "list[Pol
     levels = []
     offset_total = 0
     while True:
-        next_shape = shape.buffer(-offset_total)
+        next_shape = shape.buffer(-offset_total).simplify(0.1)
         next_level = [
             orient(candidate)
             for candidate in as_poly_list(next_shape)

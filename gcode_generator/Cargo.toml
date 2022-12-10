@@ -1,0 +1,13 @@
+[package]
+name = "gcode_generator"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+geos = {version = "8.1", features = ["v3_8_0"]}
+serde_json = "1.0"
+serde = {version = "1.0", features=["derive"]}
+clap = { version = "4.0.29", features = ["derive"] }
+tempfile = "3.3"

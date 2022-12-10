@@ -8,6 +8,7 @@ import json
 from shapely import wkt
 from shapely.validation import make_valid  # Seems we get bowties sometimes. Not sure why?
 from shapely.geometry import GeometryCollection, box
+from dataclasses import dataclass
 
 # Plots a Polygon to pyplot `ax`
 def plot_polygon(ax, poly, **kwargs):
@@ -166,6 +167,85 @@ total = union_of_list(cuts)
 
 import gcode_generator
 
+@dataclass
+class CutStep:
+    step_name: "str"
+    tool_radius: "float"
+    step_over: "float"
+    step_down: "float"
+    safety_distance: "float" = 0.0
+    feedrate: "float"
+    simplification: "float" = 0.1  # mm
+
+@dataclass
+class CutSpecification:
+    shapes: "list[Polygon or MultiPolygon]"  # first should be the background.
+    facing_step: FacingStep
+    cut_steps: CutStep
+
+
+
+# Full set of info:
+# * Shape that is meant to *remain* afterwards.
+# * For background: 
+
+def gcode_steps_to_cut_component(*, 
+    shape,
+    cut_steps,  # ordered from coarsest to finest, probably!
+    buffer,
+    depth,
+    safe_height,
+):
+    convex_hull = shape.convex_hull
+    # The full region to cut a hole into
+    negative_extent = convex_hull.buffer(buffer + cut_step[0].safety_distance)
+    # The part of the cut to treat carefully; only the coarsest step will run outside of this.
+    sensitive_negative_extent = convex_hull(buffer * 0.9)
+    # 
+
+    # First: generate the coarse step.
+    facing_gcode = gcode_generator.shape_to_gcode(
+        shape=shape,
+        inset=0,
+        stepover=cut_steps[0].step_over,
+        z_max=0,
+        z_min=0,
+        z_step=1,
+        safe_height=safe_height,
+        feedrate=cut_steps[0].feedrate,
+    )
+    results = []
+    already_cut_region = GeometryCollection([])
+
+    def gcode_for_cut(cut_step, target_region):
+        nonlocal already_cut_region
+        allowable_positions = target_region.buffer(-cut_step.radius - cut_step.safety_distance)
+        excluded_positions = already_cut_region.buffer(-cut_step.radius)  # Places not within cutting distance of something not yet cut!
+        cuttable_positions = allowable_positions.buffer(cut_step.radius)
+        result = gcode_generator.shape_to_gcode(
+            shape=allowable_positions,
+            exclusion_region=excluded_positions,
+            inset=0,
+            stepover=cut_step.step_over,
+            z_max=0,
+            z_min=-depth,
+            z_step=cut_step.step_down,
+            safe_height=safe_height,
+            feedrate=cut_step.feedrate,
+        )
+        already_cut_region = already_cut_region.union(cuttable_positions)
+        return result
+    
+    results.append(
+        facing_gcode + "\n" + gcode_for_cut(cut_step[0], negative_extent)
+    )
+
+    for cut_step in cut_steps[1:]:
+        results.append(
+            gcode_for_cut()
+        )
+
+
 safety_amount = 25.4/60
 
 for i, cut in enumerate(cuts):
@@ -200,8 +280,8 @@ for i, cut in enumerate(cuts):
         ])
         f.write(
             gcode_generator.shape_to_gcode(
-                shape=cut,
-                exclusion_region=cut.buffer(-25.4/16 - safety_amount).buffer(25.4/16),  # What was cut before unbuffered by new tool radius
+                shape=cut.buffer(-0.075), # 3 thousandths for interference!
+                exclusion_region=cut.buffer(-25.4/16 - safety_amount).buffer(25.4/16 - 0.075),  # What was cut before unbuffered by new tool radius
                 inset=25.4/80,
                 stepover=25.4/80,
                 z_max=0,
@@ -213,7 +293,6 @@ for i, cut in enumerate(cuts):
         )
 
 
-input("...")
 # final_background, remaining = to_bicuttable(
 #     primary=background,
 #     secondary=union_of_list(wkts[1:]).buffer(0.001),

@@ -22,7 +22,7 @@ colors = [
 color_index = 0
 def next_color():
     global color_index
-    result = colors[color_index]
+    result = colors[color_index % len(colors)]
     color_index += 1
     return result
 
@@ -44,7 +44,7 @@ def plot_line_string(poly, **kwargs):
 def as_geo_list(poly):
     if hasattr(poly, 'geoms'):
         return list(poly.geoms)
-    elif len(poly.exterior.coords) > 0:
+    elif not poly.is_empty:
         return [poly]
     else:
         return []
@@ -65,17 +65,20 @@ def as_line_string_list(poly):
 
 def plot_polygon_wkt(wkt_input):
     polygon = wkt.loads(wkt_input)
+    color = next_color()
     for polygon in as_poly_list(polygon):
-        plot_polygon(polygon, facecolor=next_color(), edgecolor='red', alpha=0.5)
+        plot_polygon(polygon, facecolor=color, edgecolor='red', alpha=0.5)
 
 def plot_line_wkt(wkt_input):
     lines = wkt.loads(wkt_input)
+    color = next_color()
     for line in as_line_string_list(lines):
-        plot_line_string(line)
+        plot_line_string(line, color=color)
 
 input = json.load(open(sys.argv[1]))
 
 for element in input:
+    print(f"Plotting type { element['type'] } from { element['wkt'] }")
     if element["type"] == "Polygon":
         plot_polygon_wkt(element["wkt"])
     elif element["type"] == "Line":

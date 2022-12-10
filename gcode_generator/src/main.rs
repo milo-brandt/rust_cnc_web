@@ -1,5 +1,7 @@
 // Probably need to install libgeos-dev from ppa:ubuntugis/ppa for this to work.
 
+mod region_to_spiral_path;
+
 use std::{fs, process};
 
 use geos::{Geom, Geometry};
@@ -18,11 +20,19 @@ struct WKTRow {
 enum Element {
     Polygon{
         wkt: String
+    },
+    Line{
+        wkt: String
     }
 }
 impl Element {
     pub fn from_polygon(geo: &Geometry) -> Self {
         Element::Polygon{
+            wkt: geo.to_wkt().unwrap()
+        }
+    }
+    pub fn from_line(geo: &Geometry) -> Self {
+        Element::Line{
             wkt: geo.to_wkt().unwrap()
         }
     }
@@ -36,20 +46,7 @@ fn show_geometry(geometry: &Vec<Element>) {
     process::Command::new("python3").arg("show_wkt.py").arg(file_path).spawn().and_then(|mut child| child.wait()).unwrap();
 }
 
-// Given a geometry, return a list of polygons, from largest to smallest, of all offsets at a multiple of offset_size
-fn onion_layers<'a>(geometry: &Geometry<'a>, offset_size: f64, quadsegs: i32) -> geos::GResult<Vec<Geometry<'a>>> {
-    let mut layers = Vec::new();
-    let mut offset = 0.0;
-    loop {
-        let next_geometry = geometry.buffer(-offset, quadsegs)?;
-        if next_geometry.is_empty()? {
-            return Ok(layers);
-        } else {
-            layers.push(next_geometry);
-        }
-        offset += offset_size;
-    }
-}
+// Given a geometry, return a list of polygons, from largest to smallest, of all offsets at a multiple of offset_size until the result is contained in minimum.
 
 
 fn main() {
@@ -77,7 +74,7 @@ fn main() {
         "POLYGON ((0 0, 0 5, 6 6, 6 0, 0 0), (1 1, 5 1, 5 5, 1 3, 1 1))",
     );
 
-    let layers = onion_layers(&gg3, 0.2, 16).unwrap();
+    let layers = region_to_spiral_path::onion_layers(&gg3, 0.02, 16).unwrap();
 
-    show_geometry(&layers.iter().map(Element::from_polygon).collect());
+    show_geometry(&layers.iter().map(|geo| Element::from_line(&geo.boundary().unwrap())).collect());
 }

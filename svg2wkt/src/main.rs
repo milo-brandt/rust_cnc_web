@@ -77,7 +77,7 @@ fn signed_area(pts: &Vec<(f64, f64)>) -> f64 {
     area * 0.5
 }
 
-pub struct ComparableFloat(f64);
+pub struct ComparableFloat(pub f64);
 
 impl PartialEq for ComparableFloat {
     fn eq(&self, other: &Self) -> bool {

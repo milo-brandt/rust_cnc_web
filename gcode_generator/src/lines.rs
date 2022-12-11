@@ -1,7 +1,9 @@
 
 use std::vec;
 
-use geos::{Geom, Geometry, CoordSeq};
+use geos::{Geom, Geometry, CoordSeq, GeometryTypes};
+
+use crate::comparable_float::ComparableFloat;
 
 // Represents the result of cutting: either two pieces or just one.
 pub enum CutLine<'a> {
@@ -71,7 +73,11 @@ pub fn cut_line_at<'a>(line_string: &Geometry<'a>, distance: f64) -> geos::GResu
     let mut coords = coord_seq_to_vec(&line_string.get_coord_seq()?)?;
     for (index, coord) in coords.iter().enumerate() {
         let point = Geometry::create_point(CoordSeq::new_from_vec(&[coord])?)?;
-        let current_distance = line_string.project(&point)?;
+        let current_distance = if index < coords.len() - 1 {
+            line_string.project(&point)?
+        } else {
+            line_string.length()? // in case this is a cycle, need to ensure we don't get 0!
+        };
         if index < coords.len() - 1 && current_distance == distance { // cut is right at this vertex!
             return Ok(CutLine::TwoPart(
                 Geometry::create_line_string(CoordSeq::new_from_vec(&coords[..index+1])?)?,
@@ -97,10 +103,25 @@ pub fn cut_line_near_point<'a>(line_string: &Geometry<'a>, point: &Geometry<'a>)
 pub fn cut_line_near_coordinates<'a>(line_string: &Geometry<'a>, coordinates: [f64; 2]) -> geos::GResult<CutLine<'a>> {
     cut_line_near_point(line_string, &coordinates_to_point(&coordinates)?)
 }
-
+pub fn closest_point_on_any_line<'a>(line_strings: &Vec<Geometry<'a>>, point: &Geometry<'a>) -> geos::GResult<Option<Geometry<'a>>> {
+    println!("HELLO!");
+    let mut err = None;
+    let best_line = line_strings.iter().min_by_key(|line_string| {
+        ComparableFloat(line_string.distance(point).map_err(|e| err = Some(e)).unwrap_or(0.0))
+    });
+    if let Some(err) = err {
+        return Err(err);
+    }
+    best_line.map(|line| {
+        line.project(point)
+        .and_then(|distance| {
+            line.interpolate(distance)
+        })
+    }).transpose()
+}
 
 pub fn reposition_linear_ring_to<'a>(linear_ring: &Geometry<'a>, distance: f64) -> geos::GResult<Geometry<'a>> {
-    if !linear_ring.is_closed()? {
+    if linear_ring.geometry_type() != GeometryTypes::LinearRing && !linear_ring.is_closed()? {
         return Err(geos::Error::GenericError("Cannot reposition an open line string".into()));
     }
     match cut_line_at(linear_ring, distance)? {
@@ -109,10 +130,27 @@ pub fn reposition_linear_ring_to<'a>(linear_ring: &Geometry<'a>, distance: f64) 
     }
 }
 pub fn reposition_linear_ring_near_point<'a>(line_string: &Geometry<'a>, point: &Geometry<'a>) -> geos::GResult<Geometry<'a>> {
-    reposition_linear_ring_to(line_string, line_string.project(point)?)
+    let line_string = ensure_line_string(line_string)?;
+    let result = reposition_linear_ring_to(&line_string, line_string.project(point)?);
+    result
 }
 pub fn reposition_linear_ring_near_coordinates<'a>(line_string: &Geometry<'a>, coordinates: [f64; 2]) -> geos::GResult<Geometry<'a>> {
     reposition_linear_ring_near_point(line_string, &coordinates_to_point(&coordinates)?)
+}
+
+// This duplicates the last point which is definitely not good
+pub fn last_point_in_string_or_ring<'a>(geometry: &Geometry<'a>) -> geos::GResult<Geometry<'a>> {
+    let coord_seq = geometry.get_coord_seq()?;
+    let last_index = coord_seq.number_of_lines()? - 1;
+    coordinates_to_point(&[
+        coord_seq.get_x(last_index)?,
+        coord_seq.get_y(last_index)?,
+    ])
+}
+
+// Take a linear ring or line string and return a line string.
+pub fn ensure_line_string<'a>(geometry: &Geometry<'a>) -> geos::GResult<Geometry<'a>> {
+    Geometry::create_line_string(geometry.get_coord_seq()?)
 }
 
 // Given two line strings, the first ending where the second begins, fuse them into one line string.
@@ -134,4 +172,13 @@ pub fn link_line_strings<'a>(first: &Geometry<'a>, second: &Geometry<'a>) -> geo
     Ok(Geometry::create_line_string(CoordSeq::new_from_vec(&coords)?)?)
 }
 
+pub fn linear_ring_to_polygon<'a>(ring: &Geometry<'a>) -> geos::GResult<Geometry<'a>> {
+    Geometry::create_polygon(Geom::clone(ring), Vec::new())
+}
 
+pub fn line_between_points<'a>(start: &Geometry<'a>, end: &Geometry<'a>) -> geos::GResult<Geometry<'a>> {
+    Ok(Geometry::create_line_string(CoordSeq::new_from_vec(&[
+        [start.get_x()?, start.get_y()?],
+        [end.get_x()?, end.get_y()?]
+    ])?)?)
+}

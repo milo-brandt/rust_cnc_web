@@ -2,7 +2,7 @@ use std::mem;
 
 use geos::{Geom, Geometry};
 
-use crate::collection::to_geometry_list;
+use crate::{collection::{to_geometry_list, get_interior_rings}, lines::linear_ring_to_polygon};
 
 pub fn onion_layers<'a>(geometry: &Geometry<'a>, offset_size: f64, quadsegs: i32, simplification_tolerance: f64) -> geos::GResult<Vec<Geometry<'a>>> {
     let mut layers = Vec::new();
@@ -67,4 +67,121 @@ pub fn onion_tree<'a>(geometry: &Geometry<'a>, offset_size: f64, quadsegs: i32, 
             to_geometry_list(&layer)
         }).collect::<geos::GResult<Vec<_>>>()?;
     UntamedOnionLayers{ layers }.to_onion_trees()
+}
+
+
+
+/*
+    A representation of just the rings in the onion ordered such that...
+    1. Exterior rings are parents of everything in the layer beneath contained within.
+    2. Interior rings are parents of everything in the layer beneath containing them.
+*/
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub enum RingKind {
+    Exterior,
+    Interior
+}
+
+pub struct OnionGraphNode<'a> {
+    pub kind: RingKind,
+    pub ring: Geometry<'a>,
+    pub parent_indices: Vec<usize>,
+    pub child_indices: Vec<usize>,
+}
+pub struct OnionGraph<'a> {
+    pub items: Vec<OnionGraphNode<'a>>
+}
+
+impl<'a> OnionGraphNode<'a> {
+    fn from_kind_and_ring(kind: RingKind, ring: Geometry<'a>) -> Self {
+        OnionGraphNode {
+            kind,
+            ring,
+            parent_indices: Vec::new(),
+            child_indices: Vec::new(),
+        }
+    }
+}
+
+impl<'a> OnionGraph<'a> {
+    fn add_parent_child_relationship(&mut self, parent_index: usize, child_index: usize) {
+        self.items[parent_index].child_indices.push(child_index);
+        self.items[child_index].parent_indices.push(parent_index);
+    }
+    fn add_from_polygon(&mut self, polygon: &Geometry<'a>) -> geos::GResult<()> {
+        self.items.push(
+            OnionGraphNode::from_kind_and_ring(RingKind::Exterior, polygon.get_exterior_ring()?.clone())
+        );
+        for interior_ring in get_interior_rings(polygon)? {
+            self.items.push(
+                OnionGraphNode::from_kind_and_ring(RingKind::Interior, interior_ring)
+            );
+        }
+        Ok(())
+    }
+}
+
+/*
+    Probably better rule:
+    * Exterior parents contain any exterior children
+*/
+pub fn onion_graph<'a>(geometry: &Geometry<'a>, offset_size: f64, quadsegs: i32, simplification_tolerance: f64) -> geos::GResult<OnionGraph<'a>> {
+    let mut result = OnionGraph { items: Vec::new() };
+    let mut last_layer_start = 0;
+    let mut last_layer_end = 0;
+    let mut parent_child_relationships = Vec::new();
+    let mut inherit_children_from = Vec::new(); //pairs (parent, inheritor) to copy relations from!
+    for layer in onion_layers(geometry, offset_size, quadsegs, simplification_tolerance)? {
+        // Find all the rings in this layer, and put them in.
+        for polygon in to_geometry_list(&layer)? {
+            result.add_from_polygon(&polygon)?;
+        }
+        // Iterate through all pairs of (something from prior layer, something in this layer)
+        let layer_end = result.items.len();
+        for parent_index in last_layer_start..last_layer_end {
+            let parent_item = &result.items[parent_index];
+            let mut has_child = false;
+            for child_index in last_layer_end..layer_end {
+                let child_item = &result.items[child_index];
+                // Check whether the parent relationship holds
+                // * if parent is exterior: does it contain the child?
+                // * if parent is interior: does the child contain it?
+                let has_parent_child_relation = match parent_item.kind {
+                    RingKind::Exterior => linear_ring_to_polygon(&parent_item.ring)?.contains(&child_item.ring)?,
+                    RingKind::Interior => linear_ring_to_polygon(&child_item.ring)?.contains(&parent_item.ring)?,
+                } && parent_item.kind == child_item.kind;
+                if has_parent_child_relation {
+                    println!("RELATIONSHIP OF KIND {:?}", parent_item.kind);
+                    parent_child_relationships.push((parent_index, child_index));
+                    has_child = true;
+                }
+            }
+            // If this is an interior ring not within the last layer, copy the children of the
+            // exterior ring which contains it.
+            if !has_child && parent_item.kind == RingKind::Interior {
+                // Can just iterate backwards until we find it...
+                let mut last_parent = parent_index;
+                loop {
+                    last_parent -= 1;
+                    if result.items[last_parent].kind == RingKind::Exterior {
+                        inherit_children_from.push((last_parent, parent_index));
+                        break;
+                    }
+                }
+            }
+        }
+        last_layer_start = last_layer_end;
+        last_layer_end = layer_end;
+    }
+    // This is all very hacky to get around lifetimes :/
+    for (parent_index, child_index) in parent_child_relationships {
+        result.add_parent_child_relationship(parent_index, child_index);
+    }
+    for (parent_index, inheritor_index) in inherit_children_from {
+        for child_index in result.items[parent_index].child_indices.clone() {
+            result.add_parent_child_relationship(inheritor_index, child_index);
+        }
+    }
+    Ok(result)
 }

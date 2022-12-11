@@ -17,7 +17,11 @@ colors = [
     'mediumpurple',
     'silver',
     'rosybrown',
-    'steelblue'
+    'steelblue',
+    'red',
+    'black',
+    'yellow',
+    'orange',
 ]
 color_index = 0
 def next_color():
@@ -78,7 +82,7 @@ def plot_line_wkt(wkt_input):
 input = json.load(open(sys.argv[1]))
 
 for element in input:
-    print(f"Plotting type { element['type'] } from { element['wkt'] }")
+    # print(f"Plotting type { element['type'] } from { element['wkt'] }")
     if element["type"] == "Polygon":
         plot_polygon_wkt(element["wkt"])
     elif element["type"] == "Line":

@@ -5,11 +5,14 @@ mod lines;
 mod collection;
 mod onion;
 mod spiral_path;
+mod comparable_float;
 
 use std::{fs, process};
 
 use geos::{Geom, Geometry, CoordSeq};
+use spiral_path::SpiralConfiguration;
 use serde::{Deserialize, Serialize};
+use spiral_path::cut_from_allowable_region;
 use tempfile::tempdir;
 
 use crate::onion::OnionTree;
@@ -70,7 +73,7 @@ fn main() {
 
     let gg1 = geos::Geometry::new_from_wkt("POLYGON ((0 0, 0 5, 6 6, 6 1, 10 1, 10 4, 14 4, 14 0, 0 0))")
     .expect("invalid WKT");
-    let gg2 = geos::Geometry::new_from_wkt("POLYGON ((1 1, 1 3, 5 5, 5 1, 1 1))")
+    let gg2 = geos::Geometry::new_from_wkt("POLYGON ((1 1, 1 3, 5 5, 5.5 0.5, 1 1))")
         .expect("invalid WKT");
     let mut gg3 = gg1.difference(&gg2).expect("difference failed");
     // normalize is only used for consistent ordering of vertices
@@ -93,7 +96,7 @@ fn main() {
 
     show_geometry(&vec![Element::from_line(&repositioned)])
 */
-    let trees = onion::onion_tree(&gg3, 0.07, 16, 0.001).unwrap();
+    /*let trees = onion::onion_tree(&gg3, 0.07, 16, 0.001).unwrap();
     let mut items = Vec::new();
     fn append_items(elements: &mut Vec<Element>, tree: &OnionTree) {
         println!("ENTERING ELEMENT!");
@@ -106,7 +109,19 @@ fn main() {
     }
     for tree in &trees {
         append_items(&mut items, tree)
-    }
-    show_geometry(&items);
+    }*/
+
+    let result = cut_from_allowable_region(
+        &SpiralConfiguration {
+            step_over: 0.07,
+            milling_mode: spiral_path::MillingMode::Normal,
+            simplification_tolerance: 0.01,
+            quadsegs: 16,
+        },
+        &gg3
+    ).unwrap();
+    show_geometry(&result.iter().map(|geo| Element::from_line(geo)).collect());
+
+    //show_geometry(&items);
     //show_geometry(&layers.iter().map(|geo| Element::from_line(&geo.boundary().unwrap())).collect());
 }

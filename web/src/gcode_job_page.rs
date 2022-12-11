@@ -93,28 +93,31 @@ pub fn GCodeUpload<'a, F: Fn() -> () + 'a>(cx: Scope<'a>, props: GCodeUploadProp
                 }
             };
             let input_node: HtmlInputElement = node.unchecked_into();
-            if let Some(file) = input_node.files().and_then(|files| files.item(0)) {
-                log::debug!("{:?} {}", file, file.name());
-                let form_data = FormData::new().unwrap();
-                form_data.append_with_str("filename", &file.name()).unwrap();
-                form_data.append_with_blob_and_filename("file", &file, "filename.nc").unwrap();
+            if let Some(files) = input_node.files() {
                 is_uploading.set(true);
-                let result = request::request_with_body(
-                    HttpMethod::Post, 
-                    api::UPLOAD_GCODE_FILE, 
-                    form_data,
-                ).await;
+                for index in 0..files.length() {
+                    if let Some(file) = files.item(index) {
+                        let form_data = FormData::new().unwrap();
+                        form_data.append_with_str("filename", &file.name()).unwrap();
+                        form_data.append_with_blob_and_filename("file", &file, "filename.nc").unwrap();
+                        let result = request::request_with_body(
+                            HttpMethod::Post, 
+                            api::UPLOAD_GCODE_FILE, 
+                            form_data,
+                        ).await;
+                        is_uploading.set(false);
+                        log::debug!("Result: {:?}", result);        
+                    }
+                }
+                on_upload();
                 is_uploading.set(false);
-                log::debug!("Result: {:?}", result);
-                on_upload()
             }
-            log::debug!("welp");
         });
     });
     view! { cx,
         (if !*is_uploading.get() {
             view! { cx, 
-                input(ref=node_ref, type="file") {} br{}
+                input(ref=node_ref, type="file", multiple=true) {} br{}
                 button(on:click=run_callback) { "Upload" }
             }
         } else {

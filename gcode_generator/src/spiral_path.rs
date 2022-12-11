@@ -6,7 +6,7 @@ use crate::{onion::{OnionTree, onion_tree, onion_graph, OnionGraph, OnionGraphNo
 
 #[derive(Debug, Copy, Clone)]
 pub enum MillingMode {
-    Normal, // Traverse clockwise, keeping the cutting edge on the left of the clockwise-spinning bit
+    Conventional, // Traverse clockwise, keeping the cutting edge on the left of the clockwise-spinning bit
     Climb,
 }
 
@@ -107,7 +107,7 @@ pub fn cut_from_allowable_region<'a>(configuration: &SpiralConfiguration, region
         // Reverse the specified ring if climb milling
         next_cut_info.ring = ensure_line_string(&next_cut_info.ring)?;
         match configuration.milling_mode {
-            MillingMode::Normal => (),
+            MillingMode::Conventional => (),
             MillingMode::Climb => next_cut_info.ring = next_cut_info.ring.reverse()?,
         }
         // Add in the new cut.
@@ -127,7 +127,7 @@ pub fn cut_from_allowable_region<'a>(configuration: &SpiralConfiguration, region
         // Loop through parents to see if any intersects the line...
         for parent_candidate_index in cut_generation_state.parent_candidates(next_cut_info.index) {
             let parent_ring = &cut_generation_state.graph.items[parent_candidate_index].ring;
-            if parent_ring.distance(&line_to_edge)? < configuration.simplification_tolerance * 0.1 {  //should really use .intersects, but could have rounding issues
+            if parent_ring.distance(&line_to_edge)? < configuration.simplification_tolerance {  //should really use .intersects, but could have rounding issues
                 next_cut_info_optional = Some(CutInfo::optimized(
                     parent_candidate_index,
                     true,

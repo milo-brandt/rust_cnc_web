@@ -1,7 +1,6 @@
 use geos::{Geom, Geometry, GeometryTypes};
 
 pub fn to_geometry_list<'a>(geometry: &Geometry<'a>) -> geos::GResult<Vec<Geometry<'a>>> {
-    println!("DOING: {:?}", geometry.geometry_type());
     (0..geometry.get_num_geometries()?)
         .map(|index| geometry.get_geometry_n(index).map(|geo| geo.clone()))
         .collect()

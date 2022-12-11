@@ -38,15 +38,26 @@ impl<'b, 'a> ForegroundCutInfo<'b, 'a> {
         };
         // Generate clearing pass.
         let allowable_positions = self.allowed_region.buffer(-step.tool_radius - step.safety_margin, step.quadsegs)?;
-        let remaining = self.required_region.difference(&self.cut_region)?;
+        let mut remaining = self.required_region.difference(&self.cut_region)?;
+        if step.profile_pass {
+            // if doing a profile pass, kick out anything near the boundary... they should be assumed to have been hit already!
+            let near_boundary = self.required_region.boundary()?.buffer(2.0 * step.tool_radius + step.safety_margin + step.simplification_tolerance, step.quadsegs)?;
+            remaining = remaining.difference(&near_boundary)?;
+        };
         let remaining = Geometry::create_multipolygon(
             to_polygon_list_removing_small(
                 &remaining,
-                 step.simplification_tolerance
+                 step.simplification_tolerance, // not really a good way to do this...
             )?
         )?;
 
-        let productive_positions = remaining.buffer(step.tool_radius, step.quadsegs)?;  // plus subtract out profiling here?
+        let mut productive_positions = remaining.buffer(step.tool_radius, step.quadsegs)?;  // plus subtract out profiling here?
+        if step.profile_pass {
+            // for a profile pass, also don't allow things within the stepover of the profile
+            productive_positions = productive_positions.difference(
+                &self.required_region.boundary()?.buffer(step.tool_radius + step.safety_margin + step.step_over, step.quadsegs)?
+            )?;
+        }
         let positions_to_cut = allowable_positions.intersection(&productive_positions)?;
         // Look for and remove any tiny polygons...
         /*let mut polygons_to_cut = to_polygon_list(&positions_to_cut)?;

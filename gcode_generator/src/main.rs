@@ -1,12 +1,18 @@
 // Probably need to install libgeos-dev from ppa:ubuntugis/ppa for this to work.
 
 mod region_to_spiral_path;
+mod lines;
+mod collection;
+mod onion;
+mod spiral_path;
 
 use std::{fs, process};
 
-use geos::{Geom, Geometry};
+use geos::{Geom, Geometry, CoordSeq};
 use serde::{Deserialize, Serialize};
 use tempfile::tempdir;
+
+use crate::onion::OnionTree;
 
 #[derive(Deserialize)]
 struct WKTRow {
@@ -62,19 +68,45 @@ fn main() {
         );
     }
 
-    let gg1 = geos::Geometry::new_from_wkt("POLYGON ((0 0, 0 5, 6 6, 6 0, 0 0))")
+    let gg1 = geos::Geometry::new_from_wkt("POLYGON ((0 0, 0 5, 6 6, 6 1, 10 1, 10 4, 14 4, 14 0, 0 0))")
     .expect("invalid WKT");
     let gg2 = geos::Geometry::new_from_wkt("POLYGON ((1 1, 1 3, 5 5, 5 1, 1 1))")
         .expect("invalid WKT");
     let mut gg3 = gg1.difference(&gg2).expect("difference failed");
     // normalize is only used for consistent ordering of vertices
     gg3.normalize().expect("normalize failed");
-    assert_eq!(
-        gg3.to_wkt_precision(0).expect("to_wkt failed"),
-        "POLYGON ((0 0, 0 5, 6 6, 6 0, 0 0), (1 1, 5 1, 5 5, 1 3, 1 1))",
+
+
+    //let layers = region_to_spiral_path::onion_layers(&gg3, 0.02, 16).unwrap();
+
+    /*
+    let projected = gg1.boundary().unwrap().project(&Geometry::create_point(CoordSeq::new_from_vec(&[[0.0, 10.0]]).unwrap()).unwrap()).unwrap();
+
+
+    let cut = lines::cut_line_at(&gg1.boundary().unwrap(), projected).unwrap();
+
+    show_geometry(&
+        (&cut).into_iter().map(Element::from_line).collect()
     );
 
-    let layers = region_to_spiral_path::onion_layers(&gg3, 0.02, 16).unwrap();
+    let repositioned = lines::reposition_linear_ring_to(&gg1.boundary().unwrap(), 8.0).unwrap();
 
-    show_geometry(&layers.iter().map(|geo| Element::from_line(&geo.boundary().unwrap())).collect());
+    show_geometry(&vec![Element::from_line(&repositioned)])
+*/
+    let trees = onion::onion_tree(&gg3, 0.07, 16, 0.001).unwrap();
+    let mut items = Vec::new();
+    fn append_items(elements: &mut Vec<Element>, tree: &OnionTree) {
+        println!("ENTERING ELEMENT!");
+        elements.push(Element::from_polygon(&tree.polygon));
+        for subtree in &tree.children {
+            append_items(elements, subtree);
+            assert!(tree.polygon.contains(&subtree.polygon).unwrap());
+        }
+        println!("LEAVING ELEMENT!");
+    }
+    for tree in &trees {
+        append_items(&mut items, tree)
+    }
+    show_geometry(&items);
+    //show_geometry(&layers.iter().map(|geo| Element::from_line(&geo.boundary().unwrap())).collect());
 }

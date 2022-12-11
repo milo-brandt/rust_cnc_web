@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use common::api::{self, OverrideControl};
 use futures::future::Fuse;
+use itertools::Itertools;
 use reqwasm::websocket::{futures::WebSocket, Message};
 use reqwasm::http::Request;
 use sycamore::prelude::*;
@@ -250,7 +251,7 @@ pub fn LeftStatusHeader(cx: Scope) -> View<DomNode> {
             ({
                 let value = &*global_info.grbl_info.get();
                 let x: Option<&common::grbl::GrblFullInfo> = value.as_ref();
-                x.map_or("No!".to_string(), |v| format!("{:?} {:?} {}", v.state, v.work_position(), (*global_info.job_info.get())))
+                x.map_or("No!".to_string(), |v| format!("{:?} [{}] {}", v.state, v.work_position().iter().map(|v| format!("{:.3}", v)).collect_vec().join(", "), (*global_info.job_info.get())))
             }) br {}
             div {
                 IconButton(icon_name=button_kind, on_click=on_click, disabled=button_disabled)

@@ -6,16 +6,20 @@ mod collection;
 mod onion;
 mod spiral_path;
 mod comparable_float;
+mod multitool_path;
+mod gcode;
 
 use std::{fs, process};
 
 use geos::{Geom, Geometry, CoordSeq};
-use spiral_path::SpiralConfiguration;
+use itertools::chain;
+use multitool_path::{ForegroundCutInfo, CuttingStep};
+use spiral_path::{SpiralConfiguration, MillingMode};
 use serde::{Deserialize, Serialize};
 use spiral_path::cut_from_allowable_region;
 use tempfile::tempdir;
 
-use crate::onion::OnionTree;
+use crate::{onion::OnionTree, gcode::{stroke_paths, paths_to_coordinates, StrokeOptions, reflect_paths}};
 
 #[derive(Deserialize)]
 struct WKTRow {
@@ -110,18 +114,128 @@ fn main() {
     for tree in &trees {
         append_items(&mut items, tree)
     }*/
+    let gg4 = Geom::clone(&gg3); //gg1.buffer(0.5, 16).unwrap().difference(&gg2).unwrap();
 
-    let result = cut_from_allowable_region(
+    let gg3 = Clone::clone(&geometries[1]);
+    let gg4 = geometries[1].buffer(4.0, 16).unwrap().difference(&geometries[0]).unwrap();
+
+
+    
+    /*let result = cut_from_allowable_region(
         &SpiralConfiguration {
-            step_over: 0.07,
+            step_over: 0.041,
             milling_mode: spiral_path::MillingMode::Normal,
             simplification_tolerance: 0.01,
             quadsegs: 16,
         },
         &gg3
-    ).unwrap();
-    show_geometry(&result.iter().map(|geo| Element::from_line(geo)).collect());
+    ).unwrap();*/
+    let show = |paths: &Vec<Geometry>| {
+        show_geometry(&paths.iter().map(|geo| Element::from_line(geo)).collect());
+    };
 
-    //show_geometry(&items);
-    //show_geometry(&layers.iter().map(|geo| Element::from_line(&geo.boundary().unwrap())).collect());
+    let coarse_info = CuttingStep {
+        tool_radius: 25.4/16.0,
+        step_over: 25.4/16.0,
+        safety_margin: 25.4/80.0,
+        simplification_tolerance: 0.025,
+        quadsegs: 16,
+        milling_mode: MillingMode::Normal,
+        profile_pass: false,
+    };
+    let fine_info = CuttingStep {
+        tool_radius: 25.4/80.0,
+        step_over: 25.4/80.0,
+        safety_margin: 0.0,
+        simplification_tolerance: 0.025,
+        quadsegs: 16,
+        milling_mode: MillingMode::Normal,
+        profile_pass: true,
+    };
+    let facing_stroke = StrokeOptions {
+        safe_height: 3.0,
+        feedrate: 2000.0,
+        z_max: 0.0,
+        z_min: 0.0,
+        z_step: 1.7,
+    };
+    let coarse_stroke = StrokeOptions {
+        safe_height: 3.0,
+        feedrate: 2000.0,
+        z_max: 0.0,
+        z_min: -3.0,
+        z_step: 1.7,
+    };
+    let fine_stroke = StrokeOptions {
+        safe_height: 3.0,
+        feedrate: 2000.0,
+        z_max: 0.0,
+        z_min: -3.0,
+        z_step: 0.51,
+    };
+
+    // Foreground cut
+    {
+        let target_region = geometries[0].convex_hull().unwrap().buffer(25.4*0.25, 16).unwrap();
+        let total_region = geometries[0].convex_hull().unwrap().buffer(25.4*0.5, 16).unwrap();
+        let required_region = target_region.difference(&geometries[0]).unwrap();
+        let allowed_region = total_region.difference(&geometries[0]).unwrap();
+    
+    
+        let mut foreground_cut = ForegroundCutInfo {
+            required_region: &required_region,
+            allowed_region: &allowed_region,
+            cut_region: Geometry::create_multipolygon(Vec::new()).unwrap()
+        };
+
+        let allowed_facing = geometries[0].buffer(10.0, 16).unwrap();
+        let mut facing_cut = ForegroundCutInfo {
+            required_region: &geometries[0],
+            allowed_region: &allowed_facing,
+            cut_region: Geometry::create_multipolygon(Vec::new()).unwrap()
+        };
+
+        let facing_step = facing_cut.add_step(&coarse_info).unwrap();
+        let coarse_step = foreground_cut.add_step(&coarse_info).unwrap();
+        let fine_step = foreground_cut.add_step(&fine_info).unwrap();
+
+        let facing_gcode = stroke_paths(&facing_stroke, &reflect_paths(paths_to_coordinates(&facing_step).unwrap()));
+        let coarse_gcode = stroke_paths(&coarse_stroke, &reflect_paths(paths_to_coordinates(&coarse_step).unwrap()));
+        let fine_gcode = stroke_paths(&fine_stroke, &reflect_paths(paths_to_coordinates(&fine_step).unwrap()));
+
+        fs::write("inlay_tree_foreground_fine_path.nc", fine_gcode).unwrap();
+        fs::write("inlay_tree_foreground_coarse_path.nc", format!("{}\n\n\n\n{}", facing_gcode, coarse_gcode)).unwrap();
+    }
+
+    // Background cut
+    {
+        let required_region = Clone::clone(&geometries[0]);
+        let allowed_region = Clone::clone(&geometries[0]);
+    
+        let mut foreground_cut = ForegroundCutInfo {
+            required_region: &required_region,
+            allowed_region: &allowed_region,
+            cut_region: Geometry::create_multipolygon(Vec::new()).unwrap()
+        };
+
+        let allowed_facing = geometries[1].buffer(10.0, 16).unwrap();
+        let mut facing_cut = ForegroundCutInfo {
+            required_region: &geometries[1],
+            allowed_region: &allowed_facing,
+            cut_region: Geometry::create_multipolygon(Vec::new()).unwrap()
+        };
+
+        let facing_step = facing_cut.add_step(&coarse_info).unwrap();
+        let coarse_step = foreground_cut.add_step(&coarse_info).unwrap();
+        let fine_step = foreground_cut.add_step(&fine_info).unwrap();
+
+        let facing_gcode = stroke_paths(&facing_stroke, &paths_to_coordinates(&facing_step).unwrap());
+        let coarse_gcode = stroke_paths(&coarse_stroke, &paths_to_coordinates(&coarse_step).unwrap());
+        let fine_gcode = stroke_paths(&fine_stroke, &paths_to_coordinates(&fine_step).unwrap());
+
+        fs::write("inlay_tree_background_fine_path.nc", fine_gcode).unwrap();
+        fs::write("inlay_tree_background_coarse_path.nc", format!("{}\n\n\n\n{}", facing_gcode, coarse_gcode)).unwrap();
+    }
+
+
 }

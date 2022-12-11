@@ -104,7 +104,6 @@ pub fn cut_line_near_coordinates<'a>(line_string: &Geometry<'a>, coordinates: [f
     cut_line_near_point(line_string, &coordinates_to_point(&coordinates)?)
 }
 pub fn closest_point_on_any_line<'a>(line_strings: &Vec<Geometry<'a>>, point: &Geometry<'a>) -> geos::GResult<Option<Geometry<'a>>> {
-    println!("HELLO!");
     let mut err = None;
     let best_line = line_strings.iter().min_by_key(|line_string| {
         ComparableFloat(line_string.distance(point).map_err(|e| err = Some(e)).unwrap_or(0.0))

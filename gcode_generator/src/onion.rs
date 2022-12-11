@@ -8,7 +8,7 @@ pub fn onion_layers<'a>(geometry: &Geometry<'a>, offset_size: f64, quadsegs: i32
     let mut layers = Vec::new();
     let mut offset = 0.0;
     loop {
-        let mut next_geometry = geometry.buffer(-offset, quadsegs)?.simplify(simplification_tolerance)?;
+        let mut next_geometry = geometry.buffer(-offset, quadsegs)?.topology_preserve_simplify(simplification_tolerance)?;
         next_geometry.normalize()?;
         if next_geometry.is_empty()? {
             return Ok(layers);
@@ -123,8 +123,7 @@ impl<'a> OnionGraph<'a> {
 }
 
 /*
-    Probably better rule:
-    * Exterior parents contain any exterior children
+    Two edges are related if the outer layer minus the inner one has a path between the rings in question.
 */
 pub fn onion_graph<'a>(geometry: &Geometry<'a>, offset_size: f64, quadsegs: i32, simplification_tolerance: f64) -> geos::GResult<OnionGraph<'a>> {
     let mut result = OnionGraph { items: Vec::new() };
@@ -152,7 +151,6 @@ pub fn onion_graph<'a>(geometry: &Geometry<'a>, offset_size: f64, quadsegs: i32,
                     RingKind::Interior => linear_ring_to_polygon(&child_item.ring)?.contains(&parent_item.ring)?,
                 } && parent_item.kind == child_item.kind;
                 if has_parent_child_relation {
-                    println!("RELATIONSHIP OF KIND {:?}", parent_item.kind);
                     parent_child_relationships.push((parent_index, child_index));
                     has_child = true;
                 }

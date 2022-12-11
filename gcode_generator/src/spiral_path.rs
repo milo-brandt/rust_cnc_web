@@ -55,7 +55,6 @@ impl<'a> CutGenerationState<'a> {
         (0..self.graph.items.len()).filter(|index| self.is_candidate(*index)).collect()
     }
     fn parent_candidates(&self, last_index: usize) -> Vec<usize> {
-        println!("PARENT INDICES: {:?}", self.graph.items[last_index].parent_indices);
         self.graph.items[last_index].parent_indices.iter().copied().filter(|index| self.is_candidate(*index)).collect()
     }
 }
@@ -67,7 +66,6 @@ struct CutInfo<'a> {
 }
 impl<'a> CutInfo<'a> {
     fn optimized(index: usize, joined: bool, ring: &Geometry<'a>, last_point: &Geometry<'a>) -> geos::GResult<Self> {
-        println!("GETTING AN OPTIMIZED ONE!");
         Ok(CutInfo {
             index,
             joined,
@@ -116,13 +114,7 @@ pub fn cut_from_allowable_region<'a>(configuration: &SpiralConfiguration, region
         if next_cut_info.joined {
             let last_path = paths.last_mut().unwrap();
             *last_path = link_line_strings(last_path, &next_cut_info.ring)?;
-        } else {
-            println!("START OF NEW PATH!!!!");
-            println!("START OF NEW PATH!!!!");
-            println!("START OF NEW PATH!!!!");
-            println!("START OF NEW PATH!!!!");
-            println!("START OF NEW PATH!!!!");
-            
+        } else {            
             paths.push(next_cut_info.ring);
         }
         cut_generation_state.existing_cuts.insert(next_cut_info.index);
@@ -133,7 +125,6 @@ pub fn cut_from_allowable_region<'a>(configuration: &SpiralConfiguration, region
         let line_to_edge = line_between_points(&last_point, &closest_exterior_point)?;
         //paths.insert(0, Geom::clone(&line_to_edge));
         // Loop through parents to see if any intersects the line...
-
         for parent_candidate_index in cut_generation_state.parent_candidates(next_cut_info.index) {
             let parent_ring = &cut_generation_state.graph.items[parent_candidate_index].ring;
             if parent_ring.distance(&line_to_edge)? < configuration.simplification_tolerance * 0.1 {  //should really use .intersects, but could have rounding issues
@@ -166,12 +157,7 @@ pub fn cut_from_allowable_region<'a>(configuration: &SpiralConfiguration, region
                 &last_point
             )?);
         }
-        println!("GOING ON!");
     }
-    println!("CUT: {:?}\nCANDIDATES: {:?}", cut_generation_state.existing_cuts, cut_generation_state.overall_candidates());
     debug_assert!(cut_generation_state.existing_cuts.len() == cut_generation_state.graph.items.len());
-    for path in &paths {
-        println!("PATH: {}", path.to_wkt()?);
-    }
     Ok(paths)
 }

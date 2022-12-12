@@ -32,7 +32,11 @@ impl<'b, 'a> ForegroundCutInfo<'b, 'a> {
                 .difference(&self.cut_region.buffer(-step.tool_radius - step.safety_margin, step.quadsegs)?)?
                 .simplify(step.simplification_tolerance)?;
             self.cut_region = self.cut_region.union(&productive_boundary.buffer(step.tool_radius, step.quadsegs)?)?;
-            to_geometry_list(&productive_boundary)? // TODO: Optimize by going to closest next part each time!
+            let profile_pass = to_geometry_list(&productive_boundary)?; // TODO: Optimize by going to closest next part each time!
+            match step.milling_mode {
+                MillingMode::Conventional => profile_pass,
+                MillingMode::Climb => profile_pass.iter().map(Geometry::reverse).collect::<geos::GResult<_>>()?,
+            }
         } else {
             Vec::new()
         };

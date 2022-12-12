@@ -4,7 +4,7 @@ use geos::{Geom, Geometry};
 
 use crate::{onion::{OnionTree, onion_tree, onion_graph, OnionGraph, OnionGraphNode}, lines::{join_line_strings, reposition_linear_ring_near_point, line_between_points, last_point_in_string_or_ring, closest_point_on_any_line, ensure_line_string, link_line_strings}, comparable_float::ComparableFloat, collection::get_all_rings};
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum MillingMode {
     Conventional, // Traverse clockwise, keeping the cutting edge on the left of the clockwise-spinning bit
     Climb,

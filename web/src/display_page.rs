@@ -116,7 +116,7 @@ pub fn InteractiveDisplay<'a>(cx: Scope<'a>, props: InteractiveDisplayProps<'a>)
         uniform float distance_cutoff;
         
         void main() {
-            outColor = vec4(1, 1, 1, depth < depth_cutoff && frag_distance < distance_cutoff ? 1.0 : 0.1);
+            outColor = vec4(1, 1, 1, depth < depth_cutoff && frag_distance < distance_cutoff ? 1.0 : 0.05);
         }
         "##,
     ).unwrap();
@@ -140,7 +140,7 @@ pub fn InteractiveDisplay<'a>(cx: Scope<'a>, props: InteractiveDisplayProps<'a>)
             if value.buttons() & 1 == 1 {
                 let x_dif = value.movement_x() as f32 * 0.001;
                 let y_dif = value.movement_y() as f32 * 0.001;
-                let transformation: Quaternion<f32> = quaternion_core::exp([-y_dif, -x_dif, 0.0]);
+                let transformation: Quaternion<f32> = quaternion_core::exp([-y_dif, x_dif, 0.0]);
                 if transformation.0 != 1.0 {
                     let mut value = current_position.borrow_mut();
                     *value = quaternion_core::mul(transformation, *value).normalize();
@@ -268,7 +268,7 @@ pub fn InteractiveDisplay<'a>(cx: Scope<'a>, props: InteractiveDisplayProps<'a>)
         let scale = *current_zoom.borrow();
 
         context.uniform3fv_with_f32_array(Some(&offset_location), &[-true_center[0] * scale_factor, -true_center[1]  * scale_factor, -true_center[2]  * scale_factor + 2.0]);
-        context.uniform2fv_with_f32_array(Some(&scale_location), &[scale * 1.5 / aspect, scale * 1.5]);
+        context.uniform2fv_with_f32_array(Some(&scale_location), &[-scale * 1.5 / aspect, scale * 1.5]);
 
         let progress_value = *progress_value.get();
         let cutoff = bounds.min[2] * (1.0 - progress_value) + bounds.max[2] * progress_value;

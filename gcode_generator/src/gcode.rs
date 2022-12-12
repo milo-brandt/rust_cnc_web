@@ -56,7 +56,7 @@ pub fn reflect_paths(mut paths: Vec<Vec<[f64; 2]>>) -> Vec<Vec<[f64; 2]>> {
     paths
 }
 pub fn stroke_paths(options: &StrokeOptions, paths: &Vec<Vec<[f64; 2]>>) -> String {
-    z_steps(options.z_max, options.z_min, options.z_step).map(|depth| {
+    let main_gcode = z_steps(options.z_max, options.z_min, options.z_step).map(|depth| {
         paths.iter().map(|path| {
             let body = path.iter().map(|[x, y]| {
                 format!("G1 X{:.3} Y{:.3} Z{:.3} F{:.3}", x, y, depth, options.feedrate)
@@ -69,5 +69,6 @@ pub fn stroke_paths(options: &StrokeOptions, paths: &Vec<Vec<[f64; 2]>>) -> Stri
                 body
             )
         }).join("\n\n")
-    }).join("\n\n\n")
+    }).join("\n\n\n");
+    format!("{}\nG1 Z{} F{}", main_gcode, options.safe_height, options.feedrate)
 }

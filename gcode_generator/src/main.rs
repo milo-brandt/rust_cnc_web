@@ -8,12 +8,14 @@ mod spiral_path;
 mod comparable_float;
 mod multitool_path;
 mod gcode;
+mod smooth_region;
 
 use std::{fs, process};
 
 use geos::{Geom, Geometry, CoordSeq};
 use itertools::chain;
 use multitool_path::{ForegroundCutInfo, CuttingStep};
+use smooth_region::sequence_cuts_non_bleeding;
 use spiral_path::{SpiralConfiguration, MillingMode};
 use serde::{Deserialize, Serialize};
 use tempfile::tempdir;
@@ -130,7 +132,7 @@ fn main() {
         &gg3
     ).unwrap();*/
     let show = |paths: &Vec<Geometry>| {
-        show_geometry(&paths.iter().map(|geo| Element::from_line(geo)).collect());
+        show_geometry(&paths.iter().map(|geo| Element::from_polygon(geo)).collect());
     };
 
     let coarse_info = CuttingStep {
@@ -173,12 +175,22 @@ fn main() {
         z_step: 0.51,
     };
 
+    let result = sequence_cuts_non_bleeding(
+        vec![
+            Clone::clone(&geometries[1]),
+            Clone::clone(&geometries[0]),
+        ],
+        25.4/80.0,
+        16
+    ).unwrap();
+
+    //show(&result);
     
 
     // Background cut
     {
-        let required_region = Clone::clone(&geometries[0]);
-        let allowed_region = Clone::clone(&geometries[0]);
+        let required_region = Clone::clone(&result[1]);
+        let allowed_region = Clone::clone(&result[1]);
     
         let mut foreground_cut = ForegroundCutInfo {
             required_region: &required_region,
@@ -188,7 +200,7 @@ fn main() {
 
         let allowed_facing = geometries[1].buffer(10.0, 16).unwrap();
         let mut facing_cut = ForegroundCutInfo {
-            required_region: &geometries[1],
+            required_region: &result[0],
             allowed_region: &allowed_facing,
             cut_region: Geometry::create_multipolygon(Vec::new()).unwrap()
         };
@@ -218,8 +230,8 @@ fn main() {
     };
     // Foreground cut
     {
-        let target_region = geometries[0].envelope().unwrap().buffer(25.4*0.25, 16).unwrap();
-        let total_region = geometries[0].envelope().unwrap().buffer(25.4*0.5, 16).unwrap();
+        let target_region = result[1].envelope().unwrap().buffer(25.4*0.25, 16).unwrap();
+        let total_region = result[1].envelope().unwrap().buffer(25.4*0.5, 16).unwrap();
         let required_region = target_region.difference(&geometries[0]).unwrap();
         let allowed_region = total_region.difference(&geometries[0]).unwrap();
     
@@ -232,7 +244,7 @@ fn main() {
 
         let allowed_facing = geometries[0].buffer(10.0, 16).unwrap();
         let mut facing_cut = ForegroundCutInfo {
-            required_region: &geometries[0],
+            required_region: &result[1],
             allowed_region: &allowed_facing,
             cut_region: Geometry::create_multipolygon(Vec::new()).unwrap()
         };

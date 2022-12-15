@@ -6,9 +6,11 @@ mod gcode_job_page;
 mod jog_page;
 mod display_page;
 mod request;
+mod coordinate_page;
 pub mod render;
 
 use common::api;
+use coordinate_page::CoordinatePage;
 use display_page::DisplayPage;
 use gloo_timers::future::sleep;
 use jog_page::JogPage;
@@ -233,6 +235,8 @@ enum AppRoutes {
     Debug,
     #[to("/send_gcode")]
     SendGcode,
+    #[to("/coordinates")]
+    Coordinates,
     #[to("/jog")]
     Jog,
     #[to("/view/<name>")]
@@ -255,6 +259,10 @@ fn IndexPage(cx: Scope) -> View<DomNode> {
             br {}
             a(href="/send_gcode") {
                 "Send gcode"
+            }      
+            br {}
+            a(href="/coordinates") {
+                "Manage coordinates"
             }      
             br {}
             a(href="/jog") {
@@ -316,6 +324,9 @@ fn main() {
                                 },
                                 AppRoutes::DisplayGCode { name } => view! { cx,
                                     DisplayPage(name=name.clone())
+                                },
+                                AppRoutes::Coordinates => view! { cx, 
+                                    CoordinatePage
                                 }
                             })
                         }

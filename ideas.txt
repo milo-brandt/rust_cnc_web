@@ -1,0 +1,3 @@
+Should have history in debug page to repeat commands as desired.
+Setting coordinate systems should have an interface.
+

@@ -70,3 +70,22 @@ pub const RAPID_OVERRIDE: RapidOverride = RapidOverride {
     half: "/command/override/rapid/half",
     quarter: "/command/override/rapid/quarter",
 };
+//////
+// Coordinate management
+//////
+#[derive(Serialize, Deserialize)]
+pub struct SaveCoordinateOffset {
+    pub name: String,
+}
+#[derive(Serialize, Deserialize)]
+pub struct RestoreCoordinateOffset {
+    pub name: String,
+}
+#[derive(Serialize, Deserialize)]
+pub struct DeleteCoordinateOffset {
+    pub name: String,
+}
+pub const SAVE_COORDINATE_OFFSET: &str = "/coordinates/save";
+pub const LIST_COORDINATE_OFFSETS: &str = "/coordinates/list";
+pub const RESTORE_COORDINATE_OFFSET: &str = "/coordinates/restore";
+pub const DELETE_COORDINATE_OFFSET: &str = "/coordinates/delete";

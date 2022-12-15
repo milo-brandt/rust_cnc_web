@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use std::{sync::Mutex, convert::Infallible, thread};
+use std::{sync::Mutex, convert::Infallible, thread, collections::HashMap, borrow::Borrow};
 
 use axum::{response::{sse::Event, Sse}, extract::{multipart::Field, ContentLengthLimit}, handler::Handler};
 use cnc::{grbl::{messages::{GrblStateInfo}, standard_handler::{StandardHandler, ImmediateHandle, MachineDebugEvent, ImmediateMessage, JobHandle}, new_machine::run_machine_with_handler}, stream_job::sized_stream_to_job, gcode::{geometry::{as_lines_simple, as_lines_from_best_start}, AxisValues}};
@@ -139,6 +139,15 @@ where
     }
 }
 
+struct CoordinateOffsets {
+    offsets: Mutex<HashMap<String, Vec<f64>>>
+}
+impl CoordinateOffsets {
+    pub fn new() -> Self {
+        CoordinateOffsets { offsets: Mutex::new(HashMap::new()) }
+    }
+}
+
 
 
 
@@ -187,11 +196,17 @@ async fn run_server(machine: ImmediateHandle, debug_rx: history_broadcast::Recei
         .route(api::RAPID_OVERRIDE.half, post(immediate_command(|handle| async move { handle.override_speed(SpeedOverride::RapidHalf).await; })))
         .route(api::RAPID_OVERRIDE.quarter, post(immediate_command(|handle| async move { handle.override_speed(SpeedOverride::RapidQuarter).await; })))
 
+        .route(api::LIST_COORDINATE_OFFSETS, get(list_coordinate_offsets))
+        .route(api::SAVE_COORDINATE_OFFSET, post(save_coordinate_offset))
+        .route(api::RESTORE_COORDINATE_OFFSET, post(restore_coordinate_offset))
+        .route(api::DELETE_COORDINATE_OFFSET, delete(delete_coordinate_offset))
+
         .layer(CatchPanicLayer::new())
         .layer(cors)
         .layer(Extension(machine_arc.clone()))
         .layer(Extension(Arc::new(debug_rx)))
-        .layer(Extension(Arc::new(status_stream_task(machine_arc).await)));
+        .layer(Extension(Arc::new(status_stream_task(machine_arc).await)))
+        .layer(Extension(Arc::new(CoordinateOffsets::new())));
 
     // run it with hyper on localhost:3000
     println!("Listening on port 3000...");
@@ -484,4 +499,51 @@ async fn get_gcode_list() -> Json<Vec<String>> {
     }
     values.sort();
     Json(values)
+}
+
+
+
+async fn list_coordinate_offsets(coordinates: Extension<Arc<CoordinateOffsets>>) -> Json<Vec<String>> {
+    Json(coordinates.offsets.lock().unwrap().keys().cloned().collect_vec())
+}
+async fn save_coordinate_offset(
+    coordinates: Extension<Arc<CoordinateOffsets>>,
+    machine: Extension<Arc<ImmediateHandle>>,
+    request: Json<api::SaveCoordinateOffset>,
+) -> String {
+    let state = machine.get_state().await;
+    let wco = state.work_coordinate_offset.into_iter().collect_vec();
+    coordinates.offsets.lock().unwrap().insert(request.name.clone(), wco);
+    "ok".into()
+}
+async fn delete_coordinate_offset(
+    coordinates: Extension<Arc<CoordinateOffsets>>,
+    request: Json<api::DeleteCoordinateOffset>,
+) -> String {
+    coordinates.offsets.lock().unwrap().remove(&request.name);
+    "ok".into()
+}
+async fn restore_coordinate_offset(
+    coordinates: Extension<Arc<CoordinateOffsets>>,
+    machine: Extension<Arc<ImmediateHandle>>,
+    request: Json<api::RestoreCoordinateOffset>,
+) -> String {
+    let coords = coordinates.offsets.lock().unwrap().get(&request.name).cloned();
+    match coords {
+        None => return "no such".into(),
+        Some(coords) => {
+            let result =     machine.try_send_job(move |job_handle| async move {
+                unsafe {
+                    let result = job_handle.send_gcode_raw(format!("G10 L2 X{} Y{} Z{}\n", coords[0], coords[1], coords[2]).bytes().collect_vec()).await;
+                    if let Ok(result) = result {
+                        drop(result.await);
+                    }
+                }
+            }).await;
+            match result {
+                Ok(_) => "ok".into(),
+                Err(_) => "busy".into(),
+            }
+        }
+    }
 }

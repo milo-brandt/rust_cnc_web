@@ -105,7 +105,6 @@ pub fn GCodeUpload<'a, F: Fn() -> () + 'a>(cx: Scope<'a>, props: GCodeUploadProp
                             api::UPLOAD_GCODE_FILE, 
                             form_data,
                         ).await;
-                        is_uploading.set(false);
                         log::debug!("Result: {:?}", result);        
                     }
                 }

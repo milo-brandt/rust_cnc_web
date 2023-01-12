@@ -251,7 +251,7 @@ pub fn LeftStatusHeader(cx: Scope) -> View<DomNode> {
             ({
                 let value = &*global_info.grbl_info.get();
                 let x: Option<&common::grbl::GrblFullInfo> = value.as_ref();
-                x.map_or("No!".to_string(), |v| format!("{:?} [{}] {}", v.state, v.work_position().iter().map(|v| format!("{:.3}", v)).collect_vec().join(", "), (*global_info.job_info.get())))
+                x.map_or("No!".to_string(), |v| format!("{:?} [{}] {}{}", v.state, v.work_position().iter().map(|v| format!("{:.3}", v)).collect_vec().join(", "), *global_info.job_info.get(), if(v.probe) { " Probe!"} else { "" }))
             }) br {}
             div {
                 IconButton(icon_name=button_kind, on_click=on_click, disabled=button_disabled)

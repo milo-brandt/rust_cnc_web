@@ -88,6 +88,7 @@ impl GrblStatus {
             feed_override: self.feed_override.unwrap(),
             rapid_override: self.rapid_override.unwrap(),
             spindle_override: self.spindle_override.unwrap(),
+            probe: self.pins.map_or(false, |inner| inner.contains('P')),
         }
     }
 }
@@ -101,6 +102,7 @@ pub struct GrblStateInfo {
     pub feed_override: u8,
     pub rapid_override: u8,
     pub spindle_override: u8,
+    pub probe: bool,
 }
 impl GrblStateInfo {
     pub fn to_full_info(self) -> GrblFullInfo {
@@ -111,6 +113,7 @@ impl GrblStateInfo {
             feed_override: self.feed_override,
             rapid_override: self.rapid_override,
             spindle_override: self.spindle_override,
+            probe: self.probe,
         }
     }
 }

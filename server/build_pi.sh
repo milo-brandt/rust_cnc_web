@@ -7,7 +7,7 @@
 set -exo pipefail
 
 readonly REMOTE_MACHINE=pi@cnc
-readonly TARGET_ARCH=armv7-unknown-linux-gnueabihf
+readonly TARGET_ARCH=armv7-unknown-linux-musleabihf
 readonly BINARY=target/${TARGET_ARCH}/release/axum_web
 readonly REMOTE_BINARY=/home/pi/axum_web/axum_web
 

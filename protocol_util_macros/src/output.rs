@@ -90,6 +90,9 @@ impl Structure {
         let (impl_generics, ty_generics, _) = self.generics.split_for_impl();
         let mut where_clause = self.generics.clone().make_where_clause().clone();
         where_clause.predicates.extend(self.received_where_predicates());
+        where_clause.predicates.push(syn::parse2(quote! {
+            #name #ty_generics: ::serde::de::DeserializeOwned
+        }).unwrap());
         quote! {
             impl #impl_generics ::protocol_util::generic::Receivable for #name #ty_generics #where_clause {
                 type ReceivedAs = #rx_name #ty_generics;
@@ -135,7 +138,7 @@ impl Structure {
         let name = &self.name;
         let tx_name = &self.tx_name;
         let mut members = Vec::new();
-        let (_, type_generics, where_clause) = self.generics.split_for_impl();
+        let (_, type_generics, _) = self.generics.split_for_impl();
         let mut full_generics = self.generics.clone();
         let mut sent_generics = syn::Generics {
             lt_token: None,
@@ -143,6 +146,7 @@ impl Structure {
             gt_token: None,
             where_clause: None,
         };
+        let mut where_clause = self.generics.clone().make_where_clause().clone();
         for (name, ty) in &self.members {
             let type_name = syn::Ident::new(&name.to_string().from_case(Case::Snake).to_case(Case::UpperCamel), Span::call_site());
             full_generics.params.push(syn::parse2(quote! {
@@ -159,7 +163,13 @@ impl Structure {
             members.push(quote! {
                 #name: self.#name.prepare_in_context(context)
             });
+            where_clause.predicates.push(syn::parse2(quote! {
+                #ty: ::serde::Serialize
+            }).unwrap());
         }
+        where_clause.predicates.push(syn::parse2(quote! {
+            #name #type_generics: ::serde::Serialize
+        }).unwrap());
         quote! {
             impl #full_generics ::protocol_util::generic::SendableAs<#name #type_generics> for #tx_name #sent_generics #where_clause {
                 fn prepare_in_context(self, context: &::protocol_util::communication_context::DeferingContext) -> #name #type_generics {
@@ -235,6 +245,9 @@ impl Enum {
         let (impl_generics, ty_generics, _) = self.generics.split_for_impl();
         let mut where_clause = self.generics.clone().make_where_clause().clone();
         where_clause.predicates.extend(self.received_where_predicates());
+        where_clause.predicates.push(syn::parse2(quote! {
+            #name #ty_generics: ::serde::de::DeserializeOwned
+        }).unwrap());
         quote! {
             impl #impl_generics ::protocol_util::generic::Receivable for #name #ty_generics #where_clause {
                 type ReceivedAs = #rx_name #ty_generics;
@@ -280,7 +293,7 @@ impl Enum {
         let name = &self.name;
         let tx_name = &self.tx_name;
         let mut variants = Vec::new();
-        let (_, type_generics, where_clause) = self.generics.split_for_impl();
+        let (_, type_generics, _) = self.generics.split_for_impl();
         let mut full_generics = self.generics.clone();
         let mut sent_generics = syn::Generics {
             lt_token: None,
@@ -288,6 +301,7 @@ impl Enum {
             gt_token: None,
             where_clause: None,
         };
+        let mut where_clause = self.generics.clone().make_where_clause().clone();
         for (variant, ty) in &self.variants {
             let type_name = syn::Ident::new(&variant.to_string(), Span::call_site());
             full_generics.params.push(syn::parse2(quote! {
@@ -304,7 +318,13 @@ impl Enum {
             variants.push(quote! {
                 #tx_name::#variant(value) => #name::#variant(value.prepare_in_context(context))
             });
+            where_clause.predicates.push(syn::parse2(quote! {
+                #ty: ::serde::Serialize
+            }).unwrap());
         }
+        where_clause.predicates.push(syn::parse2(quote! {
+            #name #type_generics: ::serde::Serialize
+        }).unwrap());
         quote! {
             impl #full_generics ::protocol_util::generic::SendableAs<#name #type_generics> for #tx_name #sent_generics #where_clause {
                 fn prepare_in_context(self, context: &::protocol_util::communication_context::DeferingContext) -> #name #type_generics {

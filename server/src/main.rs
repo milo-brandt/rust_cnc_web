@@ -324,7 +324,7 @@ async fn get_gcode_file_positions(
         GCode file and parses it... (or Stream I guess?)
     */
 
-    let file = match File::open(format!("gcode/{}", message.path)).await {
+    let file = match File::open(format!("/home/pi/gcode/{}", message.path)).await {
         Ok(file) => file,
         Err(e) => return Err(format!("Error! {:?}", e)),
     };
@@ -367,7 +367,7 @@ async fn run_gcode_file(
     let spec = default_settings();
     let mut line_count = 0;
     {
-        let file = match File::open(format!("gcode/{}", message.path)).await {
+        let file = match File::open(format!("/home/pi/gcode/{}", message.path)).await {
             Ok(file) => file,
             Err(e) => return format!("Error! {:?}", e),
         };
@@ -401,7 +401,7 @@ async fn run_gcode_file(
     let result = machine.try_send_job(
         sized_stream_to_job(
             stream! {
-                let file = match File::open(format!("gcode/{}", message.path)).await {
+                let file = match File::open(format!("/home/pi/gcode/{}", message.path)).await {
                     Ok(file) => file,
                     Err(_e) => {
                         yield GeneralizedLineOwned::Comment("couldn't open file!".to_string());
@@ -465,7 +465,7 @@ async fn upload(multipart: ContentLengthLimit<Multipart, 134217728>) -> String {
                 None => return "Filename not given before file!".to_string(),
                 Some(file_name) => {
                     dump_field_to_file(
-                        File::create(format!("gcode/{}", file_name)).await.unwrap(),
+                        File::create(format!("/home/pi/gcode/{}", file_name)).await.unwrap(),
                         field
                     ).await
                 }
@@ -487,12 +487,12 @@ async fn upload(multipart: ContentLengthLimit<Multipart, 134217728>) -> String {
 
 async fn delete_file(info: Json<api::DeleteGcodeFile>) -> String {
     //TODO: Scope where we can delete :)
-    remove_file(format!("gcode/{}", info.path)).await.unwrap();
+    remove_file(format!("/home/pi/gcode/{}", info.path)).await.unwrap();
     "Ok".to_string()
 }
 
 async fn get_gcode_list() -> Json<Vec<String>> {
-    let mut entries = read_dir("gcode").await.unwrap();
+    let mut entries = read_dir("/home/pi/gcode").await.unwrap();
     let mut values = Vec::new();
     while let Some(entry) = entries.next_entry().await.unwrap() {
         values.push(entry.file_name().into_string().unwrap());

@@ -1,0 +1,14 @@
+[Unit]
+Description=CNC Server
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=1
+User=pi
+ExecStart=/home/pi/axum_web/axum_web
+
+[Install]
+WantedBy=multi-user.target

@@ -81,6 +81,8 @@ def plot_line_wkt(wkt_input):
 
 input = json.load(open(sys.argv[1]))
 
+print(input)
+
 for element in input:
     # print(f"Plotting type { element['type'] } from { element['wkt'] }")
     if element["type"] == "Polygon":

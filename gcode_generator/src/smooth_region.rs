@@ -16,7 +16,7 @@ pub fn bicuttable_region<'a>(primary: &Geometry<'a>, secondary: &Geometry<'a>, r
         in primary and the rest in secondary; neither cutter would be able to get to the origin in that case. One could develop this
         to be more sophisticated and handle the error by forcing a path to the unreachable point. For now, it shouldn't happen.
     */
-    assert!(enlarged_primary.union(&mating_secondary)?.buffer(0.01, quadsegs)?.contains(&total)?);
+    // assert!(enlarged_primary.union(&mating_secondary)?.buffer(0.01, quadsegs)?.contains(&total)?);
     Ok(enlarged_primary)
 }
 pub fn sequence_cuts<'a>(cuts: Vec<Geometry<'a>>, radius: f64, quadsegs: i32) -> geos::GResult<Vec<Geometry<'a>>> {

@@ -4,11 +4,13 @@ use syn::{parse::{ParseStream, Parse}, Error};
 
 #[derive(Debug)]
 pub struct Structure {
+    pub generics: syn::Generics,
     pub name: syn::Ident,
     pub members: Vec<(syn::Ident, syn::Type)>,
 }
 #[derive(Debug)]
 pub struct Enum {
+    pub generics: syn::Generics,
     pub name: syn::Ident,
     pub variants: Vec<(syn::Ident, syn::Type)>,
 }
@@ -33,6 +35,7 @@ impl Parse for Type {
                     fields => return Err(Error::new_spanned(fields, "Can only handle named fields.")) 
                 };
                 Ok(Type::Structure(Structure {
+                    generics: input_structure.generics,
                     name: input_structure.ident,
                     members
                 }))
@@ -52,6 +55,7 @@ impl Parse for Type {
                     }
                 }).collect::<Result<Vec<_>, _>>()?;
                 Ok(Type::Enum(Enum {
+                    generics: input_enum.generics,
                     name: input_enum.ident,
                     variants
                 }))

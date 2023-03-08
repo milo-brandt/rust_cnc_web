@@ -40,7 +40,7 @@ impl<T: Serialize> SendableAs<T> for SendableWithFutures<T> {
 // Empty enum to use as default for generics with known arms of a variant.
 pub enum Infallible {}
 impl<T: Serialize> SendableAs<T> for Infallible {
-    fn prepare_in_context(self, context: &DeferingContext) -> T {
+    fn prepare_in_context(self, _cx: &DeferingContext) -> T {
         match self { }
     }
 }

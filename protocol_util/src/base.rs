@@ -1,5 +1,5 @@
 use futures::future::ready;
-use futures::{StreamExt, Sink, SinkExt, Stream, Future};
+use futures::{StreamExt, Sink, SinkExt, Stream, Future, sink, FutureExt};
 use futures::channel::{mpsc, oneshot};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -37,6 +37,9 @@ pub struct ChannelFuture<T>(pub Channel<types::Option<T>>);
 #[serde(transparent)]
 pub struct ChannelCoFuture<T>(pub Channel<types::Option<T>>);
 
+#[derive(Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct Callback<I, O>(pub ChannelCoStream<types::Tuple<(I, ChannelCoFuture<O>)>>);
 /*
     Trait implementations
 */
@@ -309,5 +312,39 @@ impl<T: Serialize + Send + 'static, U: SendableAs<T> + Send + 'static> SendableA
             }
         });
         ChannelFuture(channel)
+    }
+}
+
+/*
+Callback: can set an asynchronous callback...
+*/
+pub struct CallbackRx<I: Serialize, O: Serialize> {
+    sender: ChannelCoStreamSender<types::Tuple<(I, ChannelCoFuture<O>)>>
+}
+impl<I: Receivable + Serialize + Send + 'static, O: Serialize + Send + DeserializeOwned + 'static, Output: SendableAs<O>, Fut: Future<Output = Output> + Send + 'static, F: FnMut(I::ReceivedAs) -> Fut + Send + 'static> SendableAs<Callback<I, O>> for F {
+    fn prepare_in_context(mut self, context: &DeferingContext) -> Callback<I, O> {
+        let sink = sink::unfold((), move |_, (input, return_slot): (I::ReceivedAs, ChannelCoFutureSender<O>)| {
+            Box::pin(self(input)).map(move |result| {
+                return_slot.channel_send(result);
+                Ok::<_, Infallible>(())
+            })
+        });
+        Callback(DefaultSendable(sink).prepare_in_context(context))
+    }
+}
+impl<I: Serialize + 'static + DeserializeOwned + Send, O: Receivable + Serialize + Send + 'static> Receivable for Callback<I, O> {
+    type ReceivedAs = CallbackRx<I, O>;
+
+    fn receive_in_context(self, context: &Context) -> Self::ReceivedAs {
+        CallbackRx {
+            sender: self.0.receive_in_context(context)
+        }
+    }
+}
+impl<I: Serialize, O: Serialize + Receivable + Send + 'static> CallbackRx<I, O> {
+    pub fn call<Input: SendableAs<I>>(&self, input: Input) -> impl Future<Output=Result<O::ReceivedAs, oneshot::Canceled>> {
+        let (tx, rx) = oneshot::channel();
+        self.sender.channel_send((input, tx));
+        rx
     }
 }

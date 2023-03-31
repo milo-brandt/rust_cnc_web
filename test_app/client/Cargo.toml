@@ -1,0 +1,35 @@
+[package]
+name = "client"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+sycamore = {version="0.8", features=["suspense"]}
+reqwasm = "0.5"
+console_error_panic_hook = "0.1"
+wasm-logger = "0.2"
+log = "0.4"
+gloo-timers = {version="0.2", features=["futures"]}
+web-sys = {version="0.3", features=[
+    "File",
+    "FileList",
+    "Document",
+    "Element",
+    "HtmlCanvasElement",
+    "MouseEvent",
+    "WebGlBuffer",
+    "WebGlVertexArrayObject",
+    "WebGl2RenderingContext",
+    "WebGlProgram",
+    "WebGlShader",
+    "WebGlUniformLocation",
+    "Window",
+    "WheelEvent",
+    "KeyboardEvent",
+]}
+wasm-bindgen = "0.2"
+protocol_util = { path = "../../protocol_util" }
+protocol_types = { path = "../protocol_types" }
+futures = "0.3"

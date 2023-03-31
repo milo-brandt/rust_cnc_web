@@ -87,4 +87,62 @@ impl<T: DeserializeOwned + Send> Receivable for Primitive<T> {
     }
 }
 
+/*
+Tuples of size 0-3
+ */
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(transparent)]
+pub struct Tuple<T>(pub T);
 
+impl SendableAs<Tuple<()>> for () {
+    fn prepare_in_context(self, context: &crate::communication_context::DeferingContext) -> Tuple<()> {
+        Tuple(())
+    }
+}
+impl Receivable for Tuple<()> {
+    type ReceivedAs = ();
+
+    fn receive_in_context(self, context: &crate::communication_context::Context) -> Self::ReceivedAs {
+        ()
+    }
+}
+
+
+impl<T: Serialize, TS: SendableAs<T>> SendableAs<Tuple<(T,)>> for (TS,) {
+    fn prepare_in_context(self, context: &crate::communication_context::DeferingContext) -> Tuple<(T,)> {
+        Tuple((self.0.prepare_in_context(context),))
+    }
+}
+impl<T: Receivable> Receivable for Tuple<(T,)> {
+    type ReceivedAs = (T::ReceivedAs,);
+
+    fn receive_in_context(self, context: &crate::communication_context::Context) -> Self::ReceivedAs {
+        (self.0.0.receive_in_context(context),)
+    }
+}
+
+impl<T: Serialize, TS: SendableAs<T>, U: Serialize, US: SendableAs<U>> SendableAs<Tuple<(T, U)>> for (TS, US) {
+    fn prepare_in_context(self, context: &crate::communication_context::DeferingContext) -> Tuple<(T, U)> {
+        Tuple((self.0.prepare_in_context(context), self.1.prepare_in_context(context)))
+    }
+}
+impl<T: Receivable, U: Receivable> Receivable for Tuple<(T, U)> {
+    type ReceivedAs = (T::ReceivedAs, U::ReceivedAs);
+
+    fn receive_in_context(self, context: &crate::communication_context::Context) -> Self::ReceivedAs {
+        (self.0.0.receive_in_context(context), self.0.1.receive_in_context(context))
+    }
+}
+
+impl<T: Serialize, TS: SendableAs<T>, U: Serialize, US: SendableAs<U>, V: Serialize, VS: SendableAs<V>> SendableAs<Tuple<(T, U, V)>> for (TS, US, VS) {
+    fn prepare_in_context(self, context: &crate::communication_context::DeferingContext) -> Tuple<(T, U, V)> {
+        Tuple((self.0.prepare_in_context(context), self.1.prepare_in_context(context), self.2.prepare_in_context(context)))
+    }
+}
+impl<T: Receivable, U: Receivable, V: Receivable> Receivable for Tuple<(T, U, V)> {
+    type ReceivedAs = (T::ReceivedAs, U::ReceivedAs, V::ReceivedAs);
+
+    fn receive_in_context(self, context: &crate::communication_context::Context) -> Self::ReceivedAs {
+        (self.0.0.receive_in_context(context), self.0.1.receive_in_context(context), self.0.2.receive_in_context(context))
+    }
+}

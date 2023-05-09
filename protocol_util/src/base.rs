@@ -197,12 +197,18 @@ impl<T: Serialize> ChannelCoFutureSender<T> {
         self.context.send_in_context(&self.channel, Some(value));
         self.closed = true;
     }
-}
-impl<T: Serialize> Drop for ChannelCoFutureSender<T> {
-    fn drop(&mut self) {
+    fn close_impl(&mut self) {
         if !self.closed {
             self.context.send_in_context(&self.channel, None::<Infallible>);
         }
+    }
+    pub fn close(mut self) {
+        self.close_impl();
+    }
+}
+impl<T: Serialize> Drop for ChannelCoFutureSender<T> {
+    fn drop(&mut self) {
+        self.close_impl();
     }
 }
 impl<T: DeserializeOwned + Serialize + Send + 'static> Receivable for ChannelCoFuture<T> {

@@ -236,17 +236,6 @@ fn main() {
     server_runtime.block_on(run_server(handler_parts.immediate_handle, handler_parts.debug_rx));
 }
 
-/*
-#[tokio::main]
-async fn main() {
-    spawn(machine_future);
-
-    // build our application with a single route
-
-}
-*/
-
-
 //TODO: Put this somewhere it can be serialized and deserialized in common between front and back ends!
 async fn listen_position(ws: WebSocketUpgrade, status_stream: Extension<Arc<StatusStreamInfo>>) -> Response {
     let mut receiver = status_stream.subscribe().await;

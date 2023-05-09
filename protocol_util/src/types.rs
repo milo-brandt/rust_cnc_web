@@ -71,6 +71,22 @@ impl<T: DeserializeOwned + Receivable, E: DeserializeOwned + Receivable> Receiva
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+pub enum Infallible{}
+
+impl Receivable for Infallible {
+    type ReceivedAs = std::convert::Infallible;
+
+    fn receive_in_context(self, _: &crate::communication_context::Context) -> Self::ReceivedAs {
+        match self {}
+    }
+}
+impl SendableAs<Infallible> for std::convert::Infallible {
+    fn prepare_in_context(self, _: &crate::communication_context::DeferingContext) -> Infallible {
+        match self {}
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 #[serde(transparent)]
 pub struct Primitive<T>(pub T);
 

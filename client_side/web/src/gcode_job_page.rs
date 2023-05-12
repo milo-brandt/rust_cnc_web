@@ -1,5 +1,6 @@
 use std::io::Read;
 use std::mem::forget;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use common::api::{self, RunGcodeFile, DeleteGcodeFile};
@@ -69,6 +70,29 @@ pub fn GcodeFile<'a, F: Fn() -> () + 'a>(cx: Scope<'a>, props: GcodeFileProps<'a
     }
 }
 
+#[derive(Prop)]
+pub struct GcodeDirectoryProps {
+    name: String,
+    link: String,
+}
+
+
+#[component]
+pub fn GcodeDirectory<'a>(cx: Scope<'a>, props: GcodeDirectoryProps) -> View<DomNode> {
+    view! { cx,
+        tr(class="gcode_line") {
+            td {
+                a(href=props.link) {
+                    (props.name) " "
+                }
+            }
+            td {}
+            td {}
+            td {}
+        }
+    }
+}
+
 
 #[derive(Prop)]
 pub struct GCodeUploadProps<F: Fn() -> ()> {
@@ -127,16 +151,25 @@ pub fn GCodeUpload<'a, F: Fn() -> () + 'a>(cx: Scope<'a>, props: GCodeUploadProp
 
 
 #[component]
-pub fn GCodePage(cx: Scope) -> View<DomNode> {
+pub fn GCodePage(cx: Scope, path: Vec<String>) -> View<DomNode> {
     let list = create_signal(cx, None);
+    let mut directory = path.join("/");
+    if !directory.is_empty() {
+        directory += "/";
+    }
+    let directory = create_ref(cx, directory);
+    let parent_directory = create_ref(cx, path[..if path.is_empty() { 0 } else { path.len() - 1}].join("/"));
     let get_list = || async {
         // TODO: Probably want some sort of debounce here?
-        let result = request::request(
-            HttpMethod::Get,
+        let result = request::request_with_json(
+            HttpMethod::Post,
             api::LIST_GCODE_FILES,
+            &api::ListGcodeFiles {
+                prefix: directory.clone()
+            },
         ).await.unwrap();
         // TODO: Would be nice to wrap the un-jsoning in the request somehow...
-        let names: Vec<String> = result.json().await.unwrap();
+        let names: Vec<api::GcodeFile> = result.json().await.unwrap();
         list.set(Some(names));
     };
     spawn_local_scoped(cx, get_list());
@@ -155,8 +188,26 @@ pub fn GCodePage(cx: Scope) -> View<DomNode> {
                     table {
                         Indexed(
                             iterable=list,
-                            view=move |cx, x| view! { cx,
-                                GcodeFile(name=x, can_send_job=global_info.is_idle, on_delete=move || spawn_local_scoped(cx, get_list()))
+                            view=move |cx, x|
+                                if x.is_file {
+                                    view! { cx,
+                                        GcodeFile(name=x.name, can_send_job=global_info.is_idle, on_delete=move || spawn_local_scoped(cx, get_list()))
+                                    }
+                                } else {
+                                    let link = format!("/send_gcode/{}{}", directory, x.name);
+                                    log::debug!("LINK: {}", link);
+                                    view! { cx,
+                                        GcodeDirectory(name=x.name.clone(), link=link)
+                                    }
+                                }
+                        )
+                        (
+                            if directory.is_empty() {
+                                view! { cx, }      
+                            } else {
+                                view! { cx,
+                                    GcodeDirectory(name="(Up)".into(), link=format!("/send_gcode/{}", parent_directory))
+                                }
                             }
                         )
                     }

@@ -51,8 +51,10 @@ enum AppRoutes {
     Index,
     #[to("/debug")]
     Debug,
-    #[to("/send_gcode")]
-    SendGcode,
+    #[to("/send_gcode/<path..>")]
+    SendGcode {
+        path: Vec<String>
+    },
     #[to("/coordinates")]
     Coordinates,
     #[to("/jog")]
@@ -69,7 +71,7 @@ impl AppRoutes {
         match self {
             AppRoutes::Index => "Home".to_string(),
             AppRoutes::Debug => "Debug".to_string(),
-            AppRoutes::SendGcode => "Send GCode".to_string(),
+            AppRoutes::SendGcode { .. } => "Send GCode".to_string(),
             AppRoutes::Coordinates => "Coordinates".to_string(),
             AppRoutes::Jog => "Jog".to_string(),
             AppRoutes::DisplayGCode { name } => format!("View - {}", name),
@@ -151,8 +153,8 @@ fn main() {
                                 AppRoutes::Debug => view! { cx,
                                     DebugPage
                                 },
-                                AppRoutes::SendGcode => view! { cx,
-                                    GCodePage
+                                AppRoutes::SendGcode { path } => view! { cx,
+                                    GCodePage(path.clone())
                                 },
                                 AppRoutes::Jog => view! { cx,
                                     JogPage

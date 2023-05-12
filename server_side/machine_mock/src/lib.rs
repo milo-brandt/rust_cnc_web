@@ -1,5 +1,3 @@
-#![feature(pin_macro)]
-
 pub mod trivial;
 #[cfg(feature = "socat")]
 pub mod socat_port;

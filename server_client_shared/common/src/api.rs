@@ -22,6 +22,15 @@ pub struct DeleteGcodeFile {
     pub path: String,
 }
 #[derive(Serialize, Deserialize)]
+pub struct ListGcodeFiles {
+    pub prefix: String,
+}
+#[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
+pub struct GcodeFile {
+    pub name: String,
+    pub is_file: bool,
+}
+#[derive(Serialize, Deserialize)]
 pub struct ExamineGcodeFile {
     pub path: String,
 }

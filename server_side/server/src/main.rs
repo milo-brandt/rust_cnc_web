@@ -1,16 +1,19 @@
 #![allow(dead_code)]
 
-use std::{sync::Mutex, convert::Infallible, thread, collections::HashMap, borrow::Borrow};
+use std::{sync::Mutex, convert::Infallible, thread, collections::HashMap, borrow::Borrow, path::{PathBuf, Path}, fs::FileType};
 
 use axum::{response::{sse::Event, Sse}, extract::{multipart::Field, ContentLengthLimit}, handler::Handler};
 use cnc::{grbl::{messages::{GrblStateInfo}, standard_handler::{StandardHandler, ImmediateHandle, MachineDebugEvent, ImmediateMessage, JobHandle}, new_machine::run_machine_with_handler}, stream_job::sized_stream_to_job, gcode::{geometry::{as_lines_simple, as_lines_from_best_start}, AxisValues}};
 use futures::{Stream, Future, pin_mut};
 use hyper::server;
+use paths::lexically_normal_path;
 use serde::Serialize;
-use tokio::{sync::{mpsc, broadcast, watch}, spawn, time::MissedTickBehavior, io::AsyncWriteExt, fs::{read_dir, remove_file}};
+use tokio::{sync::{mpsc, broadcast, watch}, spawn, time::MissedTickBehavior, io::AsyncWriteExt, fs::{read_dir, remove_file, create_dir_all}};
 use chrono::offset::Local;
 use cnc::machine_writer::BufferCountingWriter;
 mod cnc;
+mod paths;
+mod server_result;
 mod util;
 mod oneway_websocket;
 use oneway_websocket::send_stream;
@@ -19,6 +22,8 @@ use tower_http::catch_panic::CatchPanicLayer;
 use util::{history_broadcast, format_bytes::format_byte_string};
 use common::api;
 use clap::Parser;
+use anyhow::anyhow;
+use server_result::{ServerResult, ServerError};
 
 #[derive(Parser, Debug)]
 #[command(author = "Milo Brandt", version = "0.1.0", about = "Run a server connected to the given port.", long_about = None)]
@@ -26,6 +31,28 @@ struct Args {
     /// Name of the person to greet
     #[arg(short, long)]
     port: String,
+    #[arg(short, long)]
+    data_folder: String,
+}
+
+struct Config {
+    data_folder: PathBuf
+}
+
+impl Config {
+    pub fn gcode_root(&self) -> PathBuf {
+        self.data_folder.join("gcode")
+    }
+    pub fn gcode_path(&self, path: impl AsRef<Path>) -> anyhow::Result<PathBuf> {
+        match lexically_normal_path(path.as_ref()) {
+            None => Err(anyhow!("Invalid path!")),
+            Some(path) => {
+                let mut result = self.gcode_root();
+                result.push(path);
+                Ok(result)
+            }
+        }
+    }
 }
 
 
@@ -161,7 +188,7 @@ impl CoordinateOffsets {
 
 
 
-async fn run_server(machine: ImmediateHandle, debug_rx: history_broadcast::Receiver<MachineDebugEvent>) {
+async fn run_server(machine: ImmediateHandle, debug_rx: history_broadcast::Receiver<MachineDebugEvent>, config: Config) {
     let cors = CorsLayer::new()
     // allow `GET` and `POST` when accessing the resource
     .allow_methods(Any)
@@ -177,7 +204,7 @@ async fn run_server(machine: ImmediateHandle, debug_rx: history_broadcast::Recei
         .route(api::RUN_GCODE_FILE, post(run_gcode_file))
         .route(api::UPLOAD_GCODE_FILE, post(upload))
         .route(api::DELETE_GCODE_FILE, delete(delete_file))
-        .route(api::LIST_GCODE_FILES, get(get_gcode_list))
+        .route(api::LIST_GCODE_FILES, post(get_gcode_list))
         .route(api::EXAMINE_LINES_IN_GCODE_FILE, post(get_gcode_file_positions))
         
         .route(api::SEND_RAW_GCODE, post(run_gcode_unchecked))
@@ -216,7 +243,8 @@ async fn run_server(machine: ImmediateHandle, debug_rx: history_broadcast::Recei
         .layer(Extension(machine_arc.clone()))
         .layer(Extension(Arc::new(debug_rx)))
         .layer(Extension(Arc::new(status_stream_task(machine_arc).await)))
-        .layer(Extension(Arc::new(CoordinateOffsets::new())));
+        .layer(Extension(Arc::new(CoordinateOffsets::new())))
+        .layer(Extension(Arc::new(config)));
 
     // run it with hyper on localhost:3000
     println!("Listening on port 3000...");
@@ -246,7 +274,12 @@ fn main() {
         );
         machine_runtime.block_on(routine);
     });
-    server_runtime.block_on(run_server(handler_parts.immediate_handle, handler_parts.debug_rx));
+    server_runtime.block_on(run_server(
+        handler_parts.immediate_handle,
+        handler_parts.debug_rx,
+        Config{ data_folder: PathBuf::from(args.data_folder) }
+    )
+    );
 }
 
 //TODO: Put this somewhere it can be serialized and deserialized in common between front and back ends!
@@ -318,17 +351,17 @@ fn axis_value_to_array(v: &AxisValues) -> [f32; 3] {
 
 async fn get_gcode_file_positions(
     message: Json<api::ExamineGcodeFile>,
-) -> Result<Json<Vec<[f32; 3]>>, String> {
+    config: Extension<Arc<Config>>,
+) -> ServerResult<Json<Vec<[f32; 3]>>> {
     let mut program = Vec::new();
 
     /*
         A lot of code duplication; should perhaps make an iterator that just reads through a 
         GCode file and parses it... (or Stream I guess?)
     */
-
-    let file = match File::open(format!("/home/pi/gcode/{}", message.path)).await {
+    let file = match File::open(config.gcode_path(&message.path)?).await {
         Ok(file) => file,
-        Err(e) => return Err(format!("Error! {:?}", e)),
+        Err(e) => return Err(anyhow!("Error! {:?}", e).into()),
     };
     let file = BufReader::new(file);
     let mut lines = file.lines();
@@ -341,16 +374,16 @@ async fn get_gcode_file_positions(
                         program.push(line);
                     }
                     Ok(_) => {}
-                    Err(e) => return Err(format!("Error! {:?}", e)),
+                    Err(e) => return Err(anyhow!("Error! {:?}", e).into()),
                 }
             }
             Ok(None) => break,
-            Err(e) => return Err(format!("Error: {:?}", e)),
+            Err(e) => return Err(anyhow!("Error: {:?}", e).into()),
         }
     }
     let lines = as_lines_from_best_start(&program);
     let lines = match lines {
-        Err(e) => return Err(format!("Error! {:?}", e)),
+        Err(e) => return Err(anyhow!("Error! {:?}", e).into()),
         Ok(lines) => lines,
     };
     Ok(Json(lines.iter().map(axis_value_to_array).collect()))
@@ -359,19 +392,15 @@ async fn get_gcode_file_positions(
 async fn run_gcode_file(
     message: Json<api::RunGcodeFile>,
     machine: Extension<Arc<ImmediateHandle>>,
-) -> String {
-    if !message.path.chars().all(|c|
-        c.is_ascii_alphanumeric()
-        || c == '_' || c == '.'
-    ) {
-        return "Illegal path!".to_string();
-    }
+    config: Extension<Arc<Config>>,
+) -> ServerResult<String> {
+    let path = config.gcode_path(&message.path)?;
     let spec = default_settings();
     let mut line_count = 0;
     {
-        let file = match File::open(format!("/home/pi/gcode/{}", message.path)).await {
+        let file = match File::open(&path).await {
             Ok(file) => file,
-            Err(e) => return format!("Error! {:?}", e),
+            Err(e) => return Err(anyhow!("Error! {:?}", e).into()),
         };
         let file = BufReader::new(file);
         let mut lines = file.lines();
@@ -385,25 +414,25 @@ async fn run_gcode_file(
                     }
                 }
                 Ok(None) => break,
-                Err(e) => return format!("Error reading line {}! {:?}", line_count + 1, e),
+                Err(e) => return Err(anyhow!("Error reading line {}! {:?}", line_count + 1, e).into()),
             }
             line_count += 1;
         }
         if !errors.is_empty() {
-            return format!(
+            return Err(anyhow!(
                 "Encountered errors in file \"{}\"!\n{}",
                 message.path,
                 errors
                     .into_iter()
                     .map(|(line_num, error)| format!("Line {}: {}\n", line_num, error.description))
                     .format("")
-            );
+            ).into());
         }
     }
     let result = machine.try_send_job(
         sized_stream_to_job(
             stream! {
-                let file = match File::open(format!("/home/pi/gcode/{}", message.path)).await {
+                let file = match File::open(&path).await {
                     Ok(file) => file,
                     Err(_e) => {
                         yield GeneralizedLineOwned::Comment("couldn't open file!".to_string());
@@ -429,8 +458,8 @@ async fn run_gcode_file(
         )
     ).await;
     match result {
-        Ok(()) => "Job sent!".to_string(),
-        Err(_) => "Job not sent!".to_string(),
+        Ok(()) => Ok("Job sent!".to_string()),
+        Err(_) => Err(anyhow!("Job not sent!").into()),
     }
 }
 
@@ -457,50 +486,52 @@ async fn dump_field_to_file(mut file: File, mut field: Field<'_>) {
 }
 
 // Limits file size to 128 MiB.
-async fn upload(multipart: ContentLengthLimit<Multipart, 134217728>) -> String {
+async fn upload(multipart: ContentLengthLimit<Multipart, 134217728>, config: Extension<Arc<Config>>) -> ServerResult<String> {
     let mut multipart = multipart.0;
-    let mut file_name = None;
+    let mut file_name = None::<PathBuf>;
     while let Some(field) = multipart.next_field().await.unwrap() {
         let name = field.name().unwrap().to_string();
         if name == "file" {
             match file_name.take() {
-                None => return "Filename not given before file!".to_string(),
+                None => return Err(anyhow!("Filename not given before file!").into()),
                 Some(file_name) => {
+                    create_dir_all(
+                        file_name.parent().ok_or(anyhow!("Cannot specify top level as filename!"))?
+                    ).await?;
                     dump_field_to_file(
-                        File::create(format!("/home/pi/gcode/{}", file_name)).await.unwrap(),
+                        File::create(file_name).await.unwrap(),
                         field
                     ).await
                 }
             }
-            return "Uploaded!".to_string();
+            return Ok("Uploaded!".to_string());
         } else if name == "filename" {
-            let presumptive_name = field.text().await.unwrap();
-            if !presumptive_name.chars().all(|c|
-                c.is_ascii_alphanumeric()
-                || c == '_' || c == '.'
-            ) || presumptive_name.len() > 255 {
-                return "Illegal filename!".to_string();
-            }
-            file_name = Some(presumptive_name);
+            let presumptive_name = field.text().await?;
+            file_name = Some(
+                lexically_normal_path(Path::new(&presumptive_name))
+                .ok_or_else(|| anyhow!("Bad file name!"))?
+            );
         }
     }
-    "File not given!".to_string()
+    Err(ServerError::bad_request("File not given!".into()))
 }
 
-async fn delete_file(info: Json<api::DeleteGcodeFile>) -> String {
-    //TODO: Scope where we can delete :)
-    remove_file(format!("/home/pi/gcode/{}", info.path)).await.unwrap();
-    "Ok".to_string()
+async fn delete_file(info: Json<api::DeleteGcodeFile>, config: Extension<Arc<Config>>) -> ServerResult<String> {
+    remove_file(config.gcode_path(&info.path)?).await?;
+    Ok("Ok".to_string())
 }
 
-async fn get_gcode_list() -> Json<Vec<String>> {
-    let mut entries = read_dir("/home/pi/gcode").await.unwrap();
+async fn get_gcode_list(info: Json<api::ListGcodeFiles>, config: Extension<Arc<Config>>) -> ServerResult<Json<Vec<api::GcodeFile>>> {
+    let mut entries = read_dir(config.gcode_path(&info.prefix)?).await?;
     let mut values = Vec::new();
     while let Some(entry) = entries.next_entry().await.unwrap() {
-        values.push(entry.file_name().into_string().unwrap());
+        values.push(api::GcodeFile {
+            name: entry.file_name().into_string().unwrap(),
+            is_file: entry.file_type().await?.is_file(),
+        });
     }
-    values.sort();
-    Json(values)
+    values.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(Json(values))
 }
 
 

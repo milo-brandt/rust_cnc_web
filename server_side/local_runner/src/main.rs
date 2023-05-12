@@ -1,4 +1,4 @@
-use tokio::{process::Command, sync::oneshot, select};
+use tokio::{process::Command, sync::oneshot, select, fs::create_dir_all};
 
 
 #[tokio::main]
@@ -13,6 +13,10 @@ async fn main() {
             panic!("Shutting down without grace!");
         }
     }).unwrap();
+    // Create the root to store data, if not already there.
+    create_dir_all("../test_data").await.unwrap();
+    create_dir_all("../test_data/gcode").await.unwrap();
+
     let command_port = machine_mock::socat_port::port_to_command(|input, output| {
         machine_mock::trivial::trivial_machine(input, output)
     }).await.unwrap();
@@ -23,6 +27,8 @@ async fn main() {
         .arg("--")
         .arg("--port")
         .arg(command_port.get_path().as_os_str())
+        .arg("--data-folder")
+        .arg("../test_data")
         .spawn()
         .unwrap();
     select! {

@@ -30,6 +30,6 @@ web-sys = {version="0.3", features=[
     "KeyboardEvent",
 ]}
 wasm-bindgen = "0.2"
-protocol_util = { path = "../../protocol_util" }
+protocol_util = { path = "../../server_client_shared/protocol_util" }
 protocol_types = { path = "../protocol_types" }
 futures = "0.3"

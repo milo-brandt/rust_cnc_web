@@ -18,6 +18,16 @@ use tokio::runtime::{Runtime, Builder};
 use tower_http::catch_panic::CatchPanicLayer;
 use util::{history_broadcast, format_bytes::format_byte_string};
 use common::api;
+use clap::Parser;
+
+#[derive(Parser, Debug)]
+#[command(author = "Milo Brandt", version = "0.1.0", about = "Run a server connected to the given port.", long_about = None)]
+struct Args {
+    /// Name of the person to greet
+    #[arg(short, long)]
+    port: String,
+}
+
 
 use crate::cnc::grbl::handler::SpeedOverride;
 use {
@@ -216,12 +226,15 @@ async fn run_server(machine: ImmediateHandle, debug_rx: history_broadcast::Recei
         .unwrap();
 }
 
+
+
 fn main() {
+    let args = Args::parse();
     std::panic::set_hook(Box::new(|info| {
         println!("Panicking with {:?}", info);
     }));
     let server_runtime = Builder::new_multi_thread().worker_threads(3).enable_all().build().unwrap();
-    let (reader, writer) = server_runtime.block_on(cnc::connection::open_and_reset_arduino_like_serial("/dev/ttyUSB0"));
+    let (reader, writer) = server_runtime.block_on(cnc::connection::open_and_reset_arduino_like_serial(&args.port));
     let handler_parts = StandardHandler::create(default_settings());
     let handler = handler_parts.handler;
     thread::spawn(move || { // put the machine on a dedicated thread that loves to look at IO

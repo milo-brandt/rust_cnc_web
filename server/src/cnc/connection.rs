@@ -10,6 +10,7 @@ use {
     },
 };
 
+// Seems difficult to actually get a serial port; probably better to allow a normal file/tty.
 pub async fn open_and_reset_arduino_like_serial(path: &str) -> (impl AsyncRead, impl AsyncWrite) {
     let mut port = tokio_serial::new(path, 115200)
         .data_bits(DataBits::Eight)
@@ -19,10 +20,12 @@ pub async fn open_and_reset_arduino_like_serial(path: &str) -> (impl AsyncRead, 
         .stop_bits(StopBits::One)
         .open_native_async()
         .expect("failed to open serial port :(");
+    /*
     port.write_data_terminal_ready(false).expect("reset things");
     sleep(Duration::from_millis(2)).await;
     port.write_data_terminal_ready(true)
         .expect("re-reset things");
+    */
     split(port)
 }
 pub async fn as_terminal<Reader: AsyncRead + Unpin, Writer: AsyncWrite + Unpin>(

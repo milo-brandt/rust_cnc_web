@@ -18,7 +18,7 @@ mod util;
 mod oneway_websocket;
 use oneway_websocket::send_stream;
 use tokio::runtime::{Runtime, Builder};
-use tower_http::catch_panic::CatchPanicLayer;
+use tower_http::{catch_panic::CatchPanicLayer, trace::TraceLayer};
 use util::{history_broadcast, format_bytes::format_byte_string};
 use common::api;
 use clap::Parser;
@@ -239,6 +239,7 @@ async fn run_server(machine: ImmediateHandle, debug_rx: history_broadcast::Recei
         .route(api::RESTORE_COORDINATE_OFFSET, post(restore_coordinate_offset))
         .route(api::DELETE_COORDINATE_OFFSET, delete(delete_coordinate_offset))
 
+        .layer(TraceLayer::new_for_http())
         .layer(CatchPanicLayer::new())
         .layer(cors)
         .layer(Extension(machine_arc.clone()))
@@ -259,13 +260,17 @@ async fn run_server(machine: ImmediateHandle, debug_rx: history_broadcast::Recei
 
 fn main() {
     let args = Args::parse();
+    println!("Starting CNC server with configuration: {:?}", args);
     std::panic::set_hook(Box::new(|info| {
         println!("Panicking with {:?}", info);
     }));
+    tracing_subscriber::fmt::init();
     let server_runtime = Builder::new_multi_thread().worker_threads(3).enable_all().build().unwrap();
+    println!("Opening port...");
     let (reader, writer) = server_runtime.block_on(cnc::connection::open_and_reset_arduino_like_serial(&args.port));
     let handler_parts = StandardHandler::create(default_settings());
     let handler = handler_parts.handler;
+    println!("Starting threads for machine and web communication...");
     thread::spawn(move || { // put the machine on a dedicated thread that loves to look at IO
         let machine_runtime = Builder::new_current_thread().enable_all().event_interval(1).build().unwrap();
         let routine = run_machine_with_handler(

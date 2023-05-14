@@ -20,14 +20,17 @@ pub async fn open_and_reset_arduino_like_serial(path: &str) -> (impl AsyncRead, 
         .stop_bits(StopBits::One)
         .open_native_async()
         .expect("failed to open serial port :(");
-    /*
-    port.write_data_terminal_ready(false).expect("reset things");
-    sleep(Duration::from_millis(2)).await;
-    port.write_data_terminal_ready(true)
-        .expect("re-reset things");
-    */
+    // Try to do some bit twiddling to signal an arduino-like device to reset.
+    if port.write_data_terminal_ready(false).is_ok() {
+        sleep(Duration::from_millis(2)).await;
+        port.write_data_terminal_ready(true).expect("re-reset things");
+    } else {
+        // Report the error if not; probably not a big deal - happens in development environments.
+        println!("DTR manipulation to reset arduino failed.");
+    }
     split(port)
 }
+
 pub async fn as_terminal<Reader: AsyncRead + Unpin, Writer: AsyncWrite + Unpin>(
     reader: Reader,
     mut writer: Writer,

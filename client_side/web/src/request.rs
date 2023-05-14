@@ -4,7 +4,14 @@ use wasm_bindgen_futures::spawn_local;
 use futures::{FutureExt, Future};
 use serde::Serialize;
 
-const HOST_NAME: &str = "localhost:3000";
+const HOST_NAME: &str = {
+    // Looks for a CNC_HOST_NAME option during compilation.
+    let env_var = option_env!("CNC_HOST_NAME");
+    match env_var {
+        None => "localhost:3000",
+        Some(value) => value
+    }
+};
 
 pub enum HttpMethod {
     Get,

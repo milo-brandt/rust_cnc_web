@@ -8,7 +8,7 @@ use futures::{Stream, Future, pin_mut};
 use hyper::server;
 use paths::lexically_normal_path;
 use serde::Serialize;
-use tokio::{sync::{mpsc, broadcast, watch}, spawn, time::MissedTickBehavior, io::AsyncWriteExt, fs::{read_dir, remove_file, create_dir_all}};
+use tokio::{sync::{mpsc, broadcast, watch}, spawn, time::MissedTickBehavior, io::AsyncWriteExt, fs::{read_dir, remove_file, create_dir_all, remove_dir_all}};
 use chrono::offset::Local;
 use cnc::machine_writer::BufferCountingWriter;
 mod cnc;
@@ -203,6 +203,7 @@ async fn run_server(machine: ImmediateHandle, debug_rx: history_broadcast::Recei
     let app = Router::new()
         .route(api::RUN_GCODE_FILE, post(run_gcode_file))
         .route(api::UPLOAD_GCODE_FILE, post(upload))
+        .route(api::CREATE_GCODE_DIRECTORY, post(create_directory))
         .route(api::DELETE_GCODE_FILE, delete(delete_file))
         .route(api::LIST_GCODE_FILES, post(get_gcode_list))
         .route(api::EXAMINE_LINES_IN_GCODE_FILE, post(get_gcode_file_positions))
@@ -501,23 +502,29 @@ async fn upload(multipart: ContentLengthLimit<Multipart, 134217728>, config: Ext
                     dump_field_to_file(
                         File::create(file_name).await.unwrap(),
                         field
-                    ).await
+                    ).await;
                 }
             }
             return Ok("Uploaded!".to_string());
         } else if name == "filename" {
             let presumptive_name = field.text().await?;
             file_name = Some(
-                lexically_normal_path(Path::new(&presumptive_name))
-                .ok_or_else(|| anyhow!("Bad file name!"))?
+                config.gcode_path(&presumptive_name)?
             );
         }
     }
     Err(ServerError::bad_request("File not given!".into()))
 }
-
+async fn create_directory(info: Json<api::CreateGcodeDirectory>, config: Extension<Arc<Config>>) -> ServerResult<String> {
+    create_dir_all(config.gcode_path(&info.directory)?).await?;
+    Ok("Ok".to_string())
+}
 async fn delete_file(info: Json<api::DeleteGcodeFile>, config: Extension<Arc<Config>>) -> ServerResult<String> {
-    remove_file(config.gcode_path(&info.path)?).await?;
+    if(info.is_directory) {
+        remove_dir_all(config.gcode_path(&info.path)?).await?;
+    } else {
+        remove_file(config.gcode_path(&info.path)?).await?;
+    }
     Ok("Ok".to_string())
 }
 

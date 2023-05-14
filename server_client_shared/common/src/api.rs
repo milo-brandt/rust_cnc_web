@@ -20,10 +20,15 @@ pub struct RunGcodeFile {
 #[derive(Serialize, Deserialize)]
 pub struct DeleteGcodeFile {
     pub path: String,
+    pub is_directory: bool,
 }
 #[derive(Serialize, Deserialize)]
 pub struct ListGcodeFiles {
     pub prefix: String,
+}
+#[derive(Serialize, Deserialize)]
+pub struct CreateGcodeDirectory {
+    pub directory: String,
 }
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, Debug)]
 pub struct GcodeFile {
@@ -40,6 +45,7 @@ pub struct ExamineGcodeFile {
 //////
 pub const RUN_GCODE_FILE: &str = "/job/run_file";
 pub const UPLOAD_GCODE_FILE: &str = "/job/upload_file";
+pub const CREATE_GCODE_DIRECTORY: &str = "/job/create_directory";
 pub const DELETE_GCODE_FILE: &str = "/job/delete_file";
 pub const LIST_GCODE_FILES: &str = "/job/list_files";
 pub const EXAMINE_LINES_IN_GCODE_FILE: &str = "/job/examine_lines_in_file";
@@ -98,3 +104,46 @@ pub const SAVE_COORDINATE_OFFSET: &str = "/coordinates/save";
 pub const LIST_COORDINATE_OFFSETS: &str = "/coordinates/list";
 pub const RESTORE_COORDINATE_OFFSET: &str = "/coordinates/restore";
 pub const DELETE_COORDINATE_OFFSET: &str = "/coordinates/delete";
+
+
+
+/*
+post! {
+    url: "/gcode/delete_gcode_file/...",
+    body(json): DeleteGcodeFile,
+    response_ok(json): (),
+}
+
+#[path("/gcode")]
+pub mod gcode {
+    #[action(POST, "/run")]
+    pub fn run(String file) -> ();
+}
+
+
+
+trait HttpConnection {
+    pub fn request(&self, ...);
+}
+
+trait FullProvider: GCodeMark + ... { }
+trait GcodeProvider: DeleteGCodeMark + ... { }
+trait DeleteGCodeProvider: HttpConnection + ... { }
+
+trait DeleteGCodeAPI: DeleteGCodeProvider {
+    pub fn delete_gcode_file(&self, ...) -> Future<...> {
+        // ... actually forms the request
+    }
+}
+impl<T: DeleteGCodeProvider> DeleteGCodeAPI for T { }
+
+
+connection.gcode().upload(...)
+connection.gcode().mkdir(...)
+connection.gcode().delete(...)
+
+
+trait 
+
+
+ */

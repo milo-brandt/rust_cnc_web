@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use common::api::{self, RunGcodeFile, DeleteGcodeFile};
 use futures::future::{Fuse, FusedFuture};
+use itertools::Itertools;
 use reqwasm::websocket::{futures::WebSocket, Message};
 use reqwasm::http::{FormData, Request};
 use sycamore::prelude::*;
@@ -13,16 +14,18 @@ use wasm_bindgen::{JsCast, JsValue};
 use wasm_bindgen_futures::spawn_local;
 use futures::stream::StreamExt;
 use futures::channel::oneshot;
-use futures::{select, FutureExt};
+use futures::{select, FutureExt, Future};
 use stylist::style;
 use web_sys::{KeyboardEvent, Event, HtmlInputElement};
 use gloo_timers::future::sleep;
 use std::time::Duration;
 use sycamore::futures::{create_resource, spawn_local_scoped};
+use crate::components::modal_wrapper::use_modal_handler;
+use crate::components::upload_modal::UploadModal;
 use crate::request::{self, HttpMethod};
 use crate::status_header::GlobalInfo;
 use crate::utils::async_sycamore;
-
+use crate::components::folder_create_modal::FolderCreateModal;
 
 #[derive(Prop)]
 pub struct GcodeFileProps<'a, F: Fn() -> ()> {
@@ -42,16 +45,6 @@ pub fn GcodeFile<'a, F: Fn() -> () + 'a>(cx: Scope<'a>, props: GcodeFileProps<'a
         );
     });
     let on_delete = create_ref(cx, props.on_delete);
-    let delete_callback = create_ref(cx, move |_| {
-        spawn_local_scoped(cx, async {
-            request::request_with_json(
-                HttpMethod::Delete,  // Should really have method bundled in...
-                api::DELETE_GCODE_FILE,
-                &DeleteGcodeFile { path: name.clone() }
-            ).await.unwrap();
-            on_delete();
-        });
-    });
     view! { cx,
         tr(class="gcode_line") {
             td {
@@ -61,7 +54,7 @@ pub fn GcodeFile<'a, F: Fn() -> () + 'a>(cx: Scope<'a>, props: GcodeFileProps<'a
                 button(on:click=run_callback, disabled=!*props.can_send_job.get()) { "Run!" }
             }
             td {
-                button(on:click=delete_callback, disabled=!*props.can_send_job.get()) { "Delete!" }
+                button(on:click=|_| on_delete()) { "Delete!" }
             }
             td {
                 a(href=format!("/view/{}", name)) { "View!" }
@@ -71,14 +64,15 @@ pub fn GcodeFile<'a, F: Fn() -> () + 'a>(cx: Scope<'a>, props: GcodeFileProps<'a
 }
 
 #[derive(Prop)]
-pub struct GcodeDirectoryProps {
+pub struct GcodeDirectoryProps<F> {
     name: String,
     link: String,
+    on_delete: F,
 }
 
 
 #[component]
-pub fn GcodeDirectory<'a>(cx: Scope<'a>, props: GcodeDirectoryProps) -> View<DomNode> {
+pub fn GcodeDirectory<'a, F: Fn() -> () + 'a>(cx: Scope<'a>, props: GcodeDirectoryProps<F>) -> View<DomNode> {
     view! { cx,
         tr(class="gcode_line") {
             td {
@@ -87,7 +81,9 @@ pub fn GcodeDirectory<'a>(cx: Scope<'a>, props: GcodeDirectoryProps) -> View<Dom
                 }
             }
             td {}
-            td {}
+            td {
+                button(on:click=move |_| (props.on_delete)()) { "Delete directory!" }
+            }
             td {}
         }
     }
@@ -100,66 +96,13 @@ pub struct GCodeUploadProps<F: Fn() -> ()> {
 }
 
 #[component]
-pub fn GCodeUpload<'a, F: Fn() -> () + 'a>(cx: Scope<'a>, props: GCodeUploadProps<F>) -> View<DomNode> {
-    let node_ref = create_node_ref(cx);
-    let on_upload = create_ref(cx, props.on_upload);
-    let is_uploading = create_signal(cx, false);
-    let run_callback = create_ref(cx, move |_| {
-        spawn_local_scoped(cx, async move {
-            log::debug!("uploading!");
-            log::debug!("{:?}", node_ref);
-            let node: Option<DomNode> = node_ref.try_get();
-            let node = match node {
-                Some(node) => node,
-                None => {
-                    log::debug!("No upload node!");
-                    return
-                }
-            };
-            let input_node: HtmlInputElement = node.unchecked_into();
-            if let Some(files) = input_node.files() {
-                is_uploading.set(true);
-                for index in 0..files.length() {
-                    if let Some(file) = files.item(index) {
-                        let form_data = FormData::new().unwrap();
-                        form_data.append_with_str("filename", &file.name()).unwrap();
-                        form_data.append_with_blob_and_filename("file", &file, "filename.nc").unwrap();
-                        let result = request::request_with_body(
-                            HttpMethod::Post, 
-                            api::UPLOAD_GCODE_FILE, 
-                            form_data,
-                        ).await;
-                        log::debug!("Result: {:?}", result);        
-                    }
-                }
-                on_upload();
-                is_uploading.set(false);
-            }
-        });
-    });
-    view! { cx,
-        (if !*is_uploading.get() {
-            view! { cx, 
-                input(ref=node_ref, type="file", multiple=true) {} br{}
-                button(on:click=run_callback) { "Upload" }
-            }
-        } else {
-            view!{ cx, "Uploading..." }
-        })
-    }
-}
+pub fn GCodePage<'a>(cx: Scope<'a>, path: Vec<String>) -> View<DomNode> {
+    let modal = use_modal_handler(cx);
 
-
-#[component]
-pub fn GCodePage(cx: Scope, path: Vec<String>) -> View<DomNode> {
     let list = create_signal(cx, None);
-    let mut directory = path.join("/");
-    if !directory.is_empty() {
-        directory += "/";
-    }
-    let directory = create_ref(cx, directory);
+    let directory = create_ref(cx, path.iter().map(|component| format!("{}/", component)).join(""));
     let parent_directory = create_ref(cx, path[..if path.is_empty() { 0 } else { path.len() - 1}].join("/"));
-    let get_list = || async {
+    let get_list = create_ref(cx, || async {
         // TODO: Probably want some sort of debounce here?
         let result = request::request_with_json(
             HttpMethod::Post,
@@ -171,7 +114,61 @@ pub fn GCodePage(cx: Scope, path: Vec<String>) -> View<DomNode> {
         // TODO: Would be nice to wrap the un-jsoning in the request somehow...
         let names: Vec<api::GcodeFile> = result.json().await.unwrap();
         list.set(Some(names));
-    };
+    });
+    let on_upload = create_ref(cx, Box::new(move |files: Vec<web_sys::File>| Box::new(async move {
+        for file in files {
+            let form_data = FormData::new().unwrap();
+            form_data.append_with_str("filename", &format!("{}{}", directory, file.name())).unwrap();
+            form_data.append_with_blob_and_filename("file", &file, "filename.nc").unwrap();
+            let result = request::request_with_body(
+                HttpMethod::Post, 
+                api::UPLOAD_GCODE_FILE, 
+                form_data,
+            ).await;
+        }
+        get_list().await;
+        Ok(())
+    }) as Box<dyn Future<Output=Result<(), String>> + 'a>));
+    let on_close = create_ref(cx, Box::new(|| modal.clear_modal()));
+    let open_upload_modal = create_ref(cx, move |_| {
+        modal.set_modal(cx, move || {
+            view! { cx,
+                UploadModal(on_upload=on_upload.clone(), on_close=on_close.clone())
+            }
+        });
+    });
+    let open_folder_modal = create_ref(cx, move |_| {
+        modal.set_modal(cx, move || {
+            let on_upload = create_ref(cx, move |dirname| async move {
+                request::request_with_json(
+                    HttpMethod::Post,
+                    api::CREATE_GCODE_DIRECTORY,
+                    &api::CreateGcodeDirectory {
+                        directory: format!("{}{}", directory, dirname)
+                    }
+                ).await.unwrap();
+                get_list().await;
+                Ok(())
+            });
+            view! { cx,
+                FolderCreateModal(on_upload=on_upload, on_close=on_close.clone())
+            }
+        });
+    });
+    let on_delete_factory = create_ref(cx, move |name: String, is_directory: bool| {
+        let name = format!("{}{}", directory, name);
+        move || {
+            let name = name.clone();
+            spawn_local_scoped(cx, async move {
+                request::request_with_json(
+                    HttpMethod::Delete,  // Should really have method bundled in...
+                    api::DELETE_GCODE_FILE,
+                    &DeleteGcodeFile { path: name, is_directory }
+                ).await.unwrap();
+                get_list().await;
+            });
+        }
+    });
     spawn_local_scoped(cx, get_list());
     let global_info: &GlobalInfo = use_context(cx);
     //let list = create_memo(cx, move || (*list.get()).clone().unwrap_or(Vec::new()));
@@ -191,13 +188,13 @@ pub fn GCodePage(cx: Scope, path: Vec<String>) -> View<DomNode> {
                             view=move |cx, x|
                                 if x.is_file {
                                     view! { cx,
-                                        GcodeFile(name=x.name, can_send_job=global_info.is_idle, on_delete=move || spawn_local_scoped(cx, get_list()))
+                                        GcodeFile(name=x.name.clone(), can_send_job=global_info.is_idle, on_delete=on_delete_factory(x.name, false))
                                     }
                                 } else {
                                     let link = format!("/send_gcode/{}{}", directory, x.name);
                                     log::debug!("LINK: {}", link);
                                     view! { cx,
-                                        GcodeDirectory(name=x.name.clone(), link=link)
+                                        GcodeDirectory(name=x.name.clone(), link=link, on_delete=on_delete_factory(x.name, true))
                                     }
                                 }
                         )
@@ -206,7 +203,7 @@ pub fn GCodePage(cx: Scope, path: Vec<String>) -> View<DomNode> {
                                 view! { cx, }      
                             } else {
                                 view! { cx,
-                                    GcodeDirectory(name="(Up)".into(), link=format!("/send_gcode/{}", parent_directory))
+                                    a(href=format!("/send_gcode/{}", parent_directory)) { "Parent directory" }
                                 }
                             }
                         )
@@ -214,7 +211,8 @@ pub fn GCodePage(cx: Scope, path: Vec<String>) -> View<DomNode> {
                 }
             }
         })
-        GCodeUpload(on_upload=move || spawn_local_scoped(cx, get_list())) br{}
+        button(on:click=open_upload_modal) { "Upload" } br{}
+        button(on:click=open_folder_modal) { "Add Folder" } br{} 
         a(href="/") { "Go home!" }
     }
 }

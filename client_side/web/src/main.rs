@@ -7,6 +7,7 @@ mod jog_page;
 mod display_page;
 mod request;
 mod coordinate_page;
+mod components;
 pub mod render;
 
 use common::api;
@@ -44,6 +45,10 @@ use sycamore::motion::create_tweened_signal;
 use sycamore_router::{Route, Router, RouterProps};
 
 use debug_page::DebugPage;
+
+use crate::components::modal_wrapper::ModalWrapper;
+use crate::components::modal_wrapper::install_modal_handler;
+use crate::components::modal_wrapper::use_modal_handler;
 
 #[derive(Route)]
 enum AppRoutes {
@@ -127,6 +132,19 @@ fn NotFound(cx: Scope) -> View<DomNode> {
     }
 }
 
+fn component_with_effect<'a>(cx: Scope<'a>) -> (View<DomNode>, impl Fn(u64) + Clone) {
+    let signal = create_rc_signal(5);
+    let local_signal = create_ref(cx, signal.clone());
+    let result = view! {
+        cx,
+        p {
+            (local_signal.get())
+        }
+    };
+    let setter = move |value| signal.set(value);
+    return (result, setter);
+}
+
 fn main() {
     console_error_panic_hook::set_once();
     wasm_logger::init(wasm_logger::Config::default());
@@ -136,9 +154,12 @@ fn main() {
         move |title: String| document.set_title(&title)
     };
 
+
     sycamore::render(|cx| {
         provide_context_ref(cx,  unsafe { mem::transmute::<_, &GlobalInfo<'static>>(global_info(cx)) });
+        let modal_wrapper = install_modal_handler(cx);
         view! { cx,
+            (modal_wrapper)
             StatusHeader
             Router(
                 integration=HistoryIntegration::new(),

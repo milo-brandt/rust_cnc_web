@@ -1,0 +1,16 @@
+[package]
+name = "watch_exec"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+futures = "0.3.28"
+notify = { version = "5.1.0", default-features = false, features = ["macos_kqueue"] }
+tokio = { version = "1.28.0", features = ["full"] }
+clap = { version = "4.2.7", features = ["derive"] }
+reqwest = { version = "0.11.17", features = ["multipart", "json"] }
+common = { path = "../../server_client_shared/common" }
+pin-project = "1.1.0"
+async-stream = "0.3.5"

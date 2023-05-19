@@ -32,11 +32,13 @@ pub struct GcodeFileProps<'a, F: Fn() -> ()> {
     name: String,
     can_send_job: &'a ReadSignal<bool>,
     on_delete: F,
+    path: String,
 }
 
 #[component]
 pub fn GcodeFile<'a, F: Fn() -> () + 'a>(cx: Scope<'a>, props: GcodeFileProps<'a, F>) -> View<DomNode> {
     let name = create_ref(cx, props.name);
+    let path = create_ref(cx, props.path);
     let run_callback = create_ref(cx, |_| {
         request::request_detached_with_json(
             HttpMethod::Post,
@@ -57,7 +59,7 @@ pub fn GcodeFile<'a, F: Fn() -> () + 'a>(cx: Scope<'a>, props: GcodeFileProps<'a
                 button(on:click=|_| on_delete()) { "Delete!" }
             }
             td {
-                a(href=format!("/view/{}", name)) { "View!" }
+                a(href=format!("/view/{}", path)) { "View!" }
             }
         }
     }
@@ -188,7 +190,12 @@ pub fn GCodePage<'a>(cx: Scope<'a>, path: Vec<String>) -> View<DomNode> {
                             view=move |cx, x|
                                 if x.is_file {
                                     view! { cx,
-                                        GcodeFile(name=x.name.clone(), can_send_job=global_info.is_idle, on_delete=on_delete_factory(x.name, false))
+                                        GcodeFile(
+                                            name=x.name.clone(),
+                                            can_send_job=global_info.is_idle,
+                                            on_delete=on_delete_factory(x.name.clone(), false),
+                                            path=format!("{}{}", directory, x.name),
+                                        )
                                     }
                                 } else {
                                     let link = format!("/send_gcode/{}{}", directory, x.name);

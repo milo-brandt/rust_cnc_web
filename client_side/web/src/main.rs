@@ -64,9 +64,9 @@ enum AppRoutes {
     Coordinates,
     #[to("/jog")]
     Jog,
-    #[to("/view/<name>")]
+    #[to("/view/<path..>")]
     DisplayGCode {
-        name: String
+        path: Vec<String>
     },
     #[not_found]
     NotFound,
@@ -79,7 +79,7 @@ impl AppRoutes {
             AppRoutes::SendGcode { .. } => "Send GCode".to_string(),
             AppRoutes::Coordinates => "Coordinates".to_string(),
             AppRoutes::Jog => "Jog".to_string(),
-            AppRoutes::DisplayGCode { name } => format!("View - {}", name),
+            AppRoutes::DisplayGCode { path } => format!("View - {}", path.last().map_or("??", |s| &s)),
             AppRoutes::NotFound => "404".to_string(),
         }
     }
@@ -183,8 +183,8 @@ fn main() {
                                 AppRoutes::NotFound => view! { cx,
                                     NotFound
                                 },
-                                AppRoutes::DisplayGCode { name } => view! { cx,
-                                    DisplayPage(name=name.clone())
+                                AppRoutes::DisplayGCode { path } => view! { cx,
+                                    DisplayPage(path=path.clone())
                                 },
                                 AppRoutes::Coordinates => view! { cx, 
                                     CoordinatePage

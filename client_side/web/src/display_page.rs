@@ -1,6 +1,7 @@
 use std::{rc::Rc, cell::RefCell, cmp::{min, max}, fmt::Display};
 
 use common::api;
+use itertools::Itertools;
 use js_sys::Math::{sin, cos};
 use quaternion_core::{Quaternion, QuaternionOps};
 use stylist::style;
@@ -374,18 +375,24 @@ pub fn InteractiveDisplay<'a>(cx: Scope<'a>, props: InteractiveDisplayProps<'a>)
 
 #[derive(Prop)]
 pub struct DisplayPageProps {
-    name: String
+    path: Vec<String>
 }
 
 #[component]
 pub fn DisplayPage(cx: Scope, props: DisplayPageProps) -> View<DomNode> {
     let value = create_signal(cx, vec![]);
+    let path = props.path.join("/").clone();
+    let directory = if props.path.is_empty() {
+        "".into()
+    } else {
+        props.path[..props.path.len() - 1].iter().map(|item| format!("/{}", item)).join("")
+    };
     spawn_local_scoped(cx, async {
         let result = request::request_with_json(
             HttpMethod::Post,
             api::EXAMINE_LINES_IN_GCODE_FILE,
             &api::ExamineGcodeFile {
-                path: props.name.into()
+                path: path
             }
         ).await.unwrap();
         let result: Vec<[f32; 3]> = result.json().await.unwrap();
@@ -396,6 +403,6 @@ pub fn DisplayPage(cx: Scope, props: DisplayPageProps) -> View<DomNode> {
     view! { cx,
         InteractiveDisplay(positions=value)
         br{}
-        a(href="/send_gcode") { "Back!" }
+        a(href=format!("/send_gcode{}", directory)) { "Back!" }
     }
 }

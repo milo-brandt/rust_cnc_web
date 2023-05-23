@@ -1,3 +1,5 @@
+# To be placed in /etc/systemd/system/cnc_server.service
+
 [Unit]
 Description=CNC Server
 After=network.target
@@ -7,8 +9,11 @@ StartLimitIntervalSec=0
 Type=simple
 Restart=always
 RestartSec=1
-User=pi
-ExecStart=/home/pi/axum_web/axum_web
+User=root
+Group=root
+Environment=RUST_BACKTRACE=1
+Environment=RUST_LOG=tower_http=trace
+ExecStart=/home/pi/axum_web/axum_web --port /dev/ttyUSB0 --data-folder /home/pi/server_data
 
 [Install]
 WantedBy=multi-user.target

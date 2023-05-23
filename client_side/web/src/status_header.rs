@@ -216,6 +216,12 @@ pub fn LeftStatusHeader(cx: Scope) -> View<DomNode> {
             "$H"
         );
     });
+    let shutdown = create_ref(cx, || {
+        request::request_detached(
+            HttpMethod::Post,
+            api::SHUTDOWN,
+        );
+    });
     let button_kind = create_selector(cx, || {
         if *in_motion.get() {
             "stop"
@@ -259,6 +265,7 @@ pub fn LeftStatusHeader(cx: Scope) -> View<DomNode> {
                 IconButton(icon_name=create_signal(cx, "restart_alt".to_string()), on_click=stop)
                 IconButton(icon_name=create_signal(cx, "home".to_string()), on_click=home, disabled=home_disabled)
                 IconButton(icon_name=create_signal(cx, "cancel".to_string()), on_click=reset)
+                IconButton(icon_name=create_signal(cx, "power_settings_new".to_string()), on_click=shutdown)
             }
         }
     }

@@ -239,6 +239,8 @@ async fn run_server(machine: ImmediateHandle, debug_rx: history_broadcast::Recei
         .route(api::RESTORE_COORDINATE_OFFSET, post(restore_coordinate_offset))
         .route(api::DELETE_COORDINATE_OFFSET, delete(delete_coordinate_offset))
 
+        .route(api::SHUTDOWN, post(shutdown))
+
         .layer(TraceLayer::new_for_http())
         .layer(CatchPanicLayer::new())
         .layer(cors)
@@ -547,6 +549,12 @@ async fn get_gcode_list(info: Json<api::ListGcodeFiles>, config: Extension<Arc<C
 }
 
 
+async fn shutdown() -> String {
+    match system_shutdown::shutdown() {
+        Ok(()) => "Bye!".to_string(),
+        Err(err) => format!("Failed: {:?}", err),
+    }
+}
 
 async fn list_coordinate_offsets(coordinates: Extension<Arc<CoordinateOffsets>>) -> Json<Vec<String>> {
     Json(coordinates.offsets.lock().unwrap().keys().cloned().collect_vec())

@@ -105,7 +105,11 @@ pub const LIST_COORDINATE_OFFSETS: &str = "/coordinates/list";
 pub const RESTORE_COORDINATE_OFFSET: &str = "/coordinates/restore";
 pub const DELETE_COORDINATE_OFFSET: &str = "/coordinates/delete";
 
+///////
+// MISC
+///////
 
+pub const SHUTDOWN: &str = "/shutdown";
 
 /*
 post! {

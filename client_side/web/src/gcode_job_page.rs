@@ -43,7 +43,7 @@ pub fn GcodeFile<'a, F: Fn() -> () + 'a>(cx: Scope<'a>, props: GcodeFileProps<'a
         request::request_detached_with_json(
             HttpMethod::Post,
             api::RUN_GCODE_FILE,
-            &RunGcodeFile { path: name.clone() }
+            &RunGcodeFile { path: path.clone() }
         );
     });
     let on_delete = create_ref(cx, props.on_delete);

@@ -111,8 +111,8 @@ where
 }
 macro_rules! extract_input {
     ( $name: ident,  $x: expr ) => {{
-        let (input, value) = $x($name)?;
-        $name = input;
+        let (new_input, value) = $x($name)?;
+        $name = new_input;
         value
     }};
 }
@@ -254,6 +254,7 @@ fn parse_gcode_line_impl<'a, 'b>(
                 Ok(())
             }
         };
+        let mut machine_coordinates = false;
         loop {
             extract_input!(input, space0);
             if input.is_empty() {
@@ -335,6 +336,13 @@ fn parse_gcode_line_impl<'a, 'b>(
                     &mut line.modals,
                     GCodeModal::SetUnits(Unit::Millimeter)
                 ),
+                GCodePart::G("53") => {
+                    if machine_coordinates {
+                        return make_error(prior_input, "duplicate G53");
+                    } else {
+                        machine_coordinates = true;
+                    }
+                }
                 GCodePart::G("54") => append_modal!(
                     prior_input,
                     &mut line.modals,
@@ -422,7 +430,11 @@ fn parse_gcode_line_impl<'a, 'b>(
                 Some(GCodeCommand::Move {
                     mode,
                     position: line.axis_values,
+                    machine_coordinates,
                 })
+            }
+            Some(_) if machine_coordinates => {
+                return make_error(full_input, "G53 with non-move command");
             }
             Some(PrimaryCommand::Dwell) => {
                 if !line.axis_values.0.is_empty() {
@@ -480,11 +492,16 @@ fn parse_gcode_line_impl<'a, 'b>(
                     return make_error(full_input, "anonymous line contains offset axis words");
                 }
                 if line.axis_values.0.is_empty() {
-                    None
+                    if machine_coordinates {
+                        return make_error(full_input, "G53 without axis words");
+                    } else {
+                        None
+                    }
                 } else {
                     Some(GCodeCommand::Move {
                         mode: MoveMode::Unspecified,
                         position: line.axis_values,
+                        machine_coordinates,
                     })
                 }
             }
@@ -587,6 +604,7 @@ mod test {
         for input in &[
             include_str!("test_data/disk_job.nc"),
             include_str!("test_data/front_face.nc"),
+            include_str!("test_data/go_home.nc"),
         ] {
             for line in input.lines() {
                 let result = parse_generalized_line(&default_settings(), line);

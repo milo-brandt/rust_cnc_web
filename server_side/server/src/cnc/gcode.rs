@@ -77,6 +77,7 @@ pub enum GCodeCommand {
         // G0, G1 or unspecified
         mode: MoveMode,
         position: AxisValues,
+        machine_coordinates: bool,
     },
     ArcMove {
         orientation: Orientation, // Clockwise = G2, Counterclockwise = G3

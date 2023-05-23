@@ -65,7 +65,10 @@ struct GCodeCommandPrinter<'a> {
 impl<'a> Display for GCodeCommandPrinter<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.command {
-            GCodeCommand::Move { mode, position } => {
+            GCodeCommand::Move { mode, position, machine_coordinates } => {
+                if *machine_coordinates {
+                    write!(f, "G53 ")?;
+                }
                 match mode {
                     MoveMode::Rapid => write!(f, "G0 ")?,
                     MoveMode::Controlled => write!(f, "G1 ")?,
@@ -201,6 +204,7 @@ mod test {
             command: Some(GCodeCommand::Move {
                 mode: MoveMode::Controlled,
                 position: AxisValues(vec![(0, 50.002), (1, 12.5)]),
+                machine_coordinates: false,
             }),
         };
         assert_eq!(line_to_string(&line), "F1000.00 G1 X50.00 Y12.50");
@@ -212,6 +216,7 @@ mod test {
             command: Some(GCodeCommand::Move {
                 mode: MoveMode::Rapid,
                 position: AxisValues(vec![(0, 0.0), (2, -1.0 / 3.0)]),
+                machine_coordinates: false,
             }),
         };
         assert_eq!(line_to_string(&line), "G0 X0.00 Z-0.33");

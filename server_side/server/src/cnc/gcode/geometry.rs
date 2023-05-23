@@ -7,9 +7,9 @@ use super::{GCodeCommand, GCodeLine, AxisValues, ArcPlane, GCodeModal, Orientati
 
 fn get_position_from_command<'a>(command: &'a GCodeCommand) -> Option<&'a AxisValues> {
     match command {
-        GCodeCommand::Move { mode: _, position } => Some(position),
-        GCodeCommand::Probe { position, mode: _, requirement: _ } => Some(position),
-        GCodeCommand::ArcMove { orientation: _, position, offsets: _, revolutions: _} => Some(position),
+        GCodeCommand::Move { position, .. } => Some(position),
+        GCodeCommand::Probe { position, .. } => Some(position),
+        GCodeCommand::ArcMove { position, .. } => Some(position),
         _ => None
     }
 }
@@ -152,8 +152,6 @@ fn arc_points(start: &mut HashMap<usize, f64>, end: &AxisValues, offsets: &Offse
     let axis_start = map_to_axis_values(start);
     update_position(start, end)?;
     let axis_end = map_to_axis_values(start);
-    println!("STARTS {:?} {:?}", axis_start, get_step(0));
-    println!("ENDS {:?} {:?}", axis_end, get_step(step_count));
     Ok(chain!(
         [axis_start],
         (1..step_count).map(get_step),
@@ -172,11 +170,11 @@ pub fn as_lines_simple<'a>(program: impl IntoIterator<Item=&'a GCodeLine>, start
             }
         }
         match &gcode.command {
-            Some(GCodeCommand::Move { mode: _, position }) => {
+            Some(GCodeCommand::Move { position, .. }) => {
                 update_position(&mut last_position, position)?;
                 result.push(map_to_axis_values(&last_position));
             },
-            Some(GCodeCommand::Probe { mode: _, position, requirement: _ }) => {
+            Some(GCodeCommand::Probe { position, .. }) => {
                 update_position(&mut last_position, position)?;
                 result.push(map_to_axis_values(&last_position));
             },

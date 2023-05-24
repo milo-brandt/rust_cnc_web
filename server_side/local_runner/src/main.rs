@@ -16,6 +16,7 @@ async fn main() {
     // Create the root to store data, if not already there.
     create_dir_all("../test_data").await.unwrap();
     create_dir_all("../test_data/gcode").await.unwrap();
+    create_dir_all("../test_data/deleted_gcode").await.unwrap();
 
     let command_port = machine_mock::socat_port::port_to_command(|input, output| {
         machine_mock::slow::trivial_machine(input, output)

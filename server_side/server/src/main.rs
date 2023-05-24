@@ -8,8 +8,8 @@ use futures::{Stream, Future, pin_mut};
 use hyper::server;
 use paths::lexically_normal_path;
 use serde::Serialize;
-use tokio::{sync::{mpsc, broadcast, watch}, spawn, time::MissedTickBehavior, io::AsyncWriteExt, fs::{read_dir, remove_file, create_dir_all, remove_dir_all}};
-use chrono::offset::Local;
+use tokio::{sync::{mpsc, broadcast, watch}, spawn, time::MissedTickBehavior, io::AsyncWriteExt, fs::{read_dir, remove_file, create_dir_all, remove_dir_all, rename}};
+use chrono::{offset::Local, Utc};
 use cnc::machine_writer::BufferCountingWriter;
 mod cnc;
 mod paths;
@@ -543,11 +543,22 @@ async fn create_directory(info: Json<api::CreateGcodeDirectory>, config: Extensi
     Ok("Ok".to_string())
 }
 async fn delete_file(info: Json<api::DeleteGcodeFile>, config: Extension<Arc<Config>>) -> ServerResult<String> {
+    let old_path = config.gcode_path(&info.path)?;
+    if old_path == PathBuf::new() {
+        return Err(ServerError::bad_request("cannot delete root directory".to_string()));
+    }
+    let new_folder = config.data_folder.join("deleted_gcode").join(Utc::now().to_string());
+    create_dir_all(&new_folder).await?;
+    let new_path = new_folder.join(old_path.file_name().unwrap_or(std::ffi::OsStr::new("Unknown")));
+    println!("MOVING {:?} to {:?}", old_path, new_path);
+    rename(old_path, new_path).await?;
+    /*
     if(info.is_directory) {
         remove_dir_all(config.gcode_path(&info.path)?).await?;
     } else {
         remove_file(config.gcode_path(&info.path)?).await?;
     }
+    */
     Ok("Ok".to_string())
 }
 

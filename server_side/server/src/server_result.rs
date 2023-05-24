@@ -38,7 +38,7 @@ impl<T> From<T> for ServerError
         let error = anyhow::Error::from(value);
         Self {
             status_code: StatusCode::INTERNAL_SERVER_ERROR,
-            message: error.to_string()
+            message: format!("{}\n{}", error.to_string(), error.backtrace())
         }
     }
 }

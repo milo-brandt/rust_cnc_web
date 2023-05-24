@@ -31,7 +31,7 @@ async fn main() {
         .arg("--data-folder")
         .arg("../test_data")
         .env("RUST_LOG", "tower_http=trace")
-        .env("RUST_BACKTRACE", "1")
+        .env("RUST_BACKTRACE", "full")
         .spawn()
         .unwrap();
     select! {

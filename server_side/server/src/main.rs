@@ -23,7 +23,7 @@ use tower_http::{catch_panic::CatchPanicLayer, trace::TraceLayer};
 use util::{history_broadcast, format_bytes::format_byte_string};
 use common::api;
 use clap::Parser;
-use anyhow::anyhow;
+use anyhow::{anyhow, Context};
 use server_result::{ServerResult, ServerError};
 
 #[derive(Parser, Debug)]

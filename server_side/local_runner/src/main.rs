@@ -29,6 +29,8 @@ async fn main() {
         .arg(command_port.get_path().as_os_str())
         .arg("--data-folder")
         .arg("../test_data")
+        .env("RUST_LOG", "tower_http=trace")
+        .env("RUST_BACKTRACE", "1")
         .spawn()
         .unwrap();
     select! {

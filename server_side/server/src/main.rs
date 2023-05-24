@@ -2,7 +2,7 @@
 
 use std::{sync::Mutex, convert::Infallible, thread, collections::HashMap, borrow::Borrow, path::{PathBuf, Path}, fs::FileType};
 
-use axum::{response::{sse::Event, Sse}, extract::{multipart::Field, ContentLengthLimit}, handler::Handler};
+use axum::{response::{sse::Event, Sse}, extract::{multipart::Field, ContentLengthLimit, self}, handler::Handler, body::{StreamBody, BoxBody}};
 use cnc::{grbl::{messages::{GrblStateInfo}, standard_handler::{StandardHandler, ImmediateHandle, MachineDebugEvent, ImmediateMessage, JobHandle}, new_machine::run_machine_with_handler}, stream_job::sized_stream_to_job, gcode::{geometry::{as_lines_simple, as_lines_from_best_start}, AxisValues}};
 use futures::{Stream, Future, pin_mut};
 use hyper::server;
@@ -18,6 +18,7 @@ mod util;
 mod oneway_websocket;
 use oneway_websocket::send_stream;
 use tokio::runtime::{Runtime, Builder};
+use tokio_util::io::{StreamReader, ReaderStream};
 use tower_http::{catch_panic::CatchPanicLayer, trace::TraceLayer};
 use util::{history_broadcast, format_bytes::format_byte_string};
 use common::api;
@@ -45,7 +46,7 @@ impl Config {
     }
     pub fn gcode_path(&self, path: impl AsRef<Path>) -> anyhow::Result<PathBuf> {
         match lexically_normal_path(path.as_ref()) {
-            None => Err(anyhow!("Invalid path!")),
+            None => Err(anyhow!("Invalid path! {:?}", path.as_ref())),
             Some(path) => {
                 let mut result = self.gcode_root();
                 result.push(path);
@@ -207,6 +208,7 @@ async fn run_server(machine: ImmediateHandle, debug_rx: history_broadcast::Recei
         .route(api::DELETE_GCODE_FILE, delete(delete_file))
         .route(api::LIST_GCODE_FILES, post(get_gcode_list))
         .route(api::EXAMINE_LINES_IN_GCODE_FILE, post(get_gcode_file_positions))
+        .route(&format!("{}/*path", api::DOWNLOAD_GCODE), get(download_gcode_file))
         
         .route(api::SEND_RAW_GCODE, post(run_gcode_unchecked))
         .route(api::LISTEN_TO_RAW_MACHINE, get(listen_raw))
@@ -355,6 +357,21 @@ fn axis_value_to_array(v: &AxisValues) -> [f32; 3] {
         }
     }
     result
+}
+
+async fn download_gcode_file(
+    path: extract::Path<String>,
+    config: Extension<Arc<Config>>,
+) -> ServerResult<Response> {
+    let path = config.gcode_path(&path[1..])?;
+    let file = File::open(path).await?;
+    let body = BoxBody::new(StreamBody::new(ReaderStream::new(file)));
+    /* */
+    let response = Response::builder()
+        .header("Content-Type", "text/plain;")
+        .header("Content-Disposition", "inline;")
+        .body(body)?;
+    Ok(response)
 }
 
 async fn get_gcode_file_positions(

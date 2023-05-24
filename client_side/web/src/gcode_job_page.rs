@@ -3,7 +3,7 @@ use std::mem::forget;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use common::api::{self, RunGcodeFile, DeleteGcodeFile};
+use common::api::{self, RunGcodeFile, DeleteGcodeFile, DOWNLOAD_GCODE};
 use futures::future::{Fuse, FusedFuture};
 use itertools::Itertools;
 use reqwasm::websocket::{futures::WebSocket, Message};
@@ -22,7 +22,7 @@ use std::time::Duration;
 use sycamore::futures::{create_resource, spawn_local_scoped};
 use crate::components::modal_wrapper::use_modal_handler;
 use crate::components::upload_modal::UploadModal;
-use crate::request::{self, HttpMethod};
+use crate::request::{self, HttpMethod, HOST_NAME};
 use crate::status_header::GlobalInfo;
 use crate::utils::async_sycamore;
 use crate::components::folder_create_modal::FolderCreateModal;
@@ -61,6 +61,9 @@ pub fn GcodeFile<'a, F: Fn() -> () + 'a>(cx: Scope<'a>, props: GcodeFileProps<'a
             td {
                 a(href=format!("/view/{}", path)) { "View!" }
             }
+            td {
+                a(href=format!("http://{}{}/{}", HOST_NAME, DOWNLOAD_GCODE, path)) { "Download!" }
+            }
         }
     }
 }
@@ -86,6 +89,7 @@ pub fn GcodeDirectory<'a, F: Fn() -> () + 'a>(cx: Scope<'a>, props: GcodeDirecto
             td {
                 button(on:click=move |_| (props.on_delete)()) { "Delete directory!" }
             }
+            td {}
             td {}
         }
     }

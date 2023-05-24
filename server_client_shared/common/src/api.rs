@@ -56,6 +56,7 @@ pub const CREATE_GCODE_DIRECTORY: &str = "/job/create_directory";
 pub const DELETE_GCODE_FILE: &str = "/job/delete_file";
 pub const LIST_GCODE_FILES: &str = "/job/list_files";
 pub const EXAMINE_LINES_IN_GCODE_FILE: &str = "/job/examine_lines_in_file";
+pub const DOWNLOAD_GCODE: &str = "/job/download_file";
 
 /////
 // Debug utilities

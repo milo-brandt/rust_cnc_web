@@ -33,9 +33,10 @@ web-sys = {version="0.3", features=[
 stylist = "0.12"
 console_error_panic_hook = "0.1"
 gloo-timers = {version="0.2", features=["futures"]}
-common = { path = "../../server_client_shared/common" }
+common = { path = "../../server_client_shared/common", features = ["wasmbind"] }
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 js-sys = "0.3.60"
 quaternion-core = "0.3"
 itertools = "0.10"
+chrono = { version = "0.4.24", features = ["serde", "wasmbind"] }

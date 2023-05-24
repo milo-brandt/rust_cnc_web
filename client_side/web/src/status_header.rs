@@ -1,7 +1,8 @@
 use std::mem::forget;
 use std::sync::Arc;
 
-use common::api::{self, OverrideControl};
+use chrono::Utc;
+use common::api::{self, OverrideControl, JobStatus};
 use futures::future::Fuse;
 use itertools::Itertools;
 use reqwasm::websocket::{futures::WebSocket, Message};
@@ -15,21 +16,23 @@ use futures::{select, FutureExt};
 use stylist::style;
 use web_sys::{KeyboardEvent, Event};
 use gloo_timers::future::sleep;
-use std::time::Duration;
+use chrono::Duration;
 use sycamore::futures::spawn_local_scoped;
 use common::grbl::{GrblState, GrblFullInfo};
 
 use crate::mdc::IconButton;
 use crate::request::{self, HttpMethod};
+use crate::utils::time::{format_duration, second_pulse, elapsed_seconds_since, format_seconds};
 
 pub struct GlobalInfo<'a> {
     pub grbl_info: &'a ReadSignal<Option<common::grbl::GrblFullInfo>>,
-    pub job_info: &'a ReadSignal<String>,
+    pub job_info: &'a ReadSignal<Option<JobStatus>>,
     pub is_idle: &'a ReadSignal<bool>
 }
 
+
 pub fn global_info<'a>(cx: Scope<'a>) -> &'a GlobalInfo<'a> {
-    let job_info = create_signal(cx, "Waiting for connection...".to_string());
+    let job_info = create_signal(cx, None);
     let grbl_info = create_signal(cx, None);
     spawn_local_scoped(cx, async move {
         let mut ws = request::open_websocket(api::LISTEN_TO_JOB_STATUS);
@@ -42,7 +45,8 @@ pub fn global_info<'a>(cx: Scope<'a>) -> &'a GlobalInfo<'a> {
                     ws_next = ws.next().fuse();
                     match next_message {
                         Some(Ok(Message::Text(ws_message))) => {
-                            job_info.set(ws_message);
+                            let job_status: Option<JobStatus> = serde_json::from_str(&ws_message).unwrap();
+                            job_info.set(job_status);
                         }
                         _ => break
                     }
@@ -69,7 +73,7 @@ pub fn global_info<'a>(cx: Scope<'a>) -> &'a GlobalInfo<'a> {
     create_ref(cx, GlobalInfo {
         grbl_info,
         job_info,
-        is_idle: create_memo(cx, move || *job_info.get() == "Idle")
+        is_idle: create_memo(cx, move || job_info.get().is_none())
     })
 }
 
@@ -252,13 +256,36 @@ pub fn LeftStatusHeader(cx: Scope) -> View<DomNode> {
             }            
         })
     });
+    let job_start = create_signal(cx, None);
+    let job_time = elapsed_seconds_since(cx, job_start);
+    let title_message = create_memo(cx, || {
+        match global_info.grbl_info.get().as_ref() {
+            Some(grbl_info) => {
+                let job_string = match global_info.job_info.get().as_ref() {
+                    Some(job_info) => {
+                        job_start.set(Some(job_info.start_time.clone()));
+                        format!("Job ({}): {}", format_seconds(*job_time.get()), job_info.message)
+                    }
+                    None => {
+                        job_start.set(None);
+                        format!("Idle")
+                    }
+                };
+                format!(
+                    "{:?} [{}] {}",
+                    grbl_info.state,
+                    grbl_info.work_position().iter().map(|v| format!("{:.3}", v)).collect_vec().join(", "),
+                    job_string,
+                )
+            }
+            None => {
+                "Connecting...".to_string()
+            }
+        }
+    });
     view! { cx,
         div(class=css_style.get_class_name()) {
-            ({
-                let value = &*global_info.grbl_info.get();
-                let x: Option<&common::grbl::GrblFullInfo> = value.as_ref();
-                x.map_or("No!".to_string(), |v| format!("{:?} [{}] {}{}", v.state, v.work_position().iter().map(|v| format!("{:.3}", v)).collect_vec().join(", "), *global_info.job_info.get(), if(v.probe) { " Probe!"} else { "" }))
-            }) br {}
+            (title_message.get()) br {}
             div {
                 IconButton(icon_name=button_kind, on_click=on_click, disabled=button_disabled)
                 IconButton(icon_name=create_signal(cx, "lock_open".to_string()), on_click=unlock, disabled=unlock_disabled)

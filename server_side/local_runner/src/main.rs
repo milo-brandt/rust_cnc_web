@@ -18,7 +18,7 @@ async fn main() {
     create_dir_all("../test_data/gcode").await.unwrap();
 
     let command_port = machine_mock::socat_port::port_to_command(|input, output| {
-        machine_mock::trivial::trivial_machine(input, output)
+        machine_mock::slow::trivial_machine(input, output)
     }).await.unwrap();
     let mut child = Command::new("cargo")
         .arg("run")

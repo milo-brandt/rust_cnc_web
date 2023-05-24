@@ -475,13 +475,12 @@ async fn listen_status(ws: WebSocketUpgrade, machine: Extension<Arc<ImmediateHan
     let mut debug_receiver = machine.subscribe_job_status().await;
     send_stream(ws, stream! {
         // Make sure we send a first message
-        let status = debug_receiver.borrow().clone();
-        yield Message::Text(status.unwrap_or_else(|| "Idle".into()));
         loop {
-            drop(debug_receiver.changed().await);
             let status = debug_receiver.borrow().clone();
-            yield Message::Text(status.unwrap_or_else(|| "Idle".into()));
-            sleep(Duration::from_millis(100)).await; //Limit events to once per 100 ms. A little hacky - won't hear close_listen till later.
+            yield Message::Text(serde_json::to_string(&status).unwrap());
+            let sleeper = sleep(Duration::from_millis(100));
+            drop(debug_receiver.changed().await);
+            sleeper.await; //Limit events to once per 100 ms.
         }
     })
 }

@@ -1,3 +1,4 @@
+use chrono::Utc;
 use serde::{Serialize, Deserialize};
 
 pub struct OverrideControl<'a> {
@@ -11,6 +12,12 @@ pub struct RapidOverride<'a> {
     pub reset: &'a str,
     pub half: &'a str,
     pub quarter: &'a str,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct JobStatus {
+    pub start_time: chrono::DateTime<Utc>,
+    pub message: String,
 }
 
 #[derive(Serialize, Deserialize)]

@@ -9,22 +9,24 @@ use crate::{cnc::{gcode::{GCodeLine, GCodeFormatSpecification}}, util::{local_ge
 
 use super::{handler::{Handler, SpeedOverride}, new_machine::{LineError, WriteRequest, ProbeError, ImmediateRequest}, messages::{ProbeEvent, GrblStateInfo}};
 use async_trait::async_trait;
-use chrono::{DateTime, Local};
+use chrono::{DateTime, Local, Utc};
 use common::grbl::GrblState;
 use futures::{Future, io::Write, FutureExt, future::OptionFuture, pin_mut};
+use serde::Serialize;
 use tokio::{sync::{mpsc, oneshot, watch}, select, spawn, runtime::Handle, time::{sleep, timeout}};
+use common::api::JobStatus;
 
 #[derive(Debug)]
 pub enum Message {
     GetState(oneshot::Sender<GrblStateInfo>),
     Write(WriteRequest),
     Comment(String),
-    SetStatus(String),
+    SetStatus(JobStatus),
 }
 #[derive(Debug)]
 pub enum ImmediateMessage {
     GetState(oneshot::Sender<GrblStateInfo>),
-    GetJobStatus(oneshot::Sender<watch::Receiver<Option<String>>>),
+    GetJobStatus(oneshot::Sender<watch::Receiver<Option<JobStatus>>>),
     Pause,
     Resume,
     Stop,
@@ -46,11 +48,11 @@ pub enum MachineDebugEvent {
 pub struct JobFail;
 
 
-
 #[derive(Debug)]
 pub struct JobHandle {
     format_specification: Arc<GCodeFormatSpecification>,
     sender: mpsc::Sender<Message>,
+    start_time: chrono::DateTime<Utc>,
 }
 impl JobHandle {
     pub async fn send_gcode(&self, gcode: GCodeLine) -> Result<impl Future<Output=Result<(), LineError>>, JobFail> {
@@ -79,7 +81,7 @@ impl JobHandle {
         Ok(self.request_state().await?.await)
     }
     pub async fn set_status(&self, status: String) -> Result<(), JobFail> {
-        self.sender.send(Message::SetStatus(status)).await.map_err(|_| JobFail)?;
+        self.sender.send(Message::SetStatus(JobStatus { start_time: self.start_time, message: status })).await.map_err(|_| JobFail)?;
         Ok(())
     }
     /*
@@ -140,7 +142,7 @@ impl ImmediateHandle {
             None => Err(f)
         }
     }
-    pub async fn subscribe_job_status(&self) -> watch::Receiver<Option<String>> {
+    pub async fn subscribe_job_status(&self) -> watch::Receiver<Option<JobStatus>> {
         let (tx, rx) = oneshot::channel();
         self.sender.send(ImmediateMessage::GetJobStatus(tx)).await.unwrap();
         rx.await.unwrap()
@@ -162,7 +164,7 @@ pub struct StandardHandler {
     generation_counter: LocalGenerationCounter,
 
     debug_stream: history_broadcast::Sender<MachineDebugEvent>,
-    job_status: watch::Sender<Option<String>>,
+    job_status: watch::Sender<Option<JobStatus>>,
 }
 pub struct StandardHandlerParts {
     pub handler: StandardHandler,
@@ -364,7 +366,8 @@ impl Handler for StandardHandler {
                                 let (job_tx, job_rx) = mpsc::channel(16);
                                 drop(tx.send(Some(JobHandle{
                                     format_specification: self.format.clone(),
-                                    sender: job_tx
+                                    sender: job_tx,
+                                    start_time: Utc::now()
                                 })));
                                 private.job_receiver = Some(job_rx);
                             }

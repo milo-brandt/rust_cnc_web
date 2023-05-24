@@ -9,3 +9,7 @@ edition = "2021"
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 protocol_util = { path = "../protocol_util" }
+chrono = { version = "0.4.24", features = ["serde"] }
+
+[features]
+wasmbind = ["chrono/wasmbind"]

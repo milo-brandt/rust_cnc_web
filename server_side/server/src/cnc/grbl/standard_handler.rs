@@ -248,7 +248,7 @@ impl StandardHandler {
                 Ok(status) => status,
                 Err(_) => return, // exit early, causing reset to be sent.
             };
-            if status.state == GrblState::Hold(1) {
+            if status.state == (GrblState::Hold { code: 1 }) {
                 has_confirmed_halting.set(true);
             }
             // Now, while Hold(1) is the state, loop to give the machine time to stop.
@@ -258,7 +258,7 @@ impl StandardHandler {
                 match status {
                     Ok(state_info) => {
                         match state_info.state {
-                            GrblState::Hold(1) => {
+                            GrblState::Hold { code: 1 } => {
                                 has_confirmed_halting.set(true);
                             },
                             _ => return

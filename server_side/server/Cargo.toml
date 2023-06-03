@@ -6,9 +6,10 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-axum = { version = "0.5", features = ["ws", "multipart"] }
+axum = { version = "0.6", features = ["ws", "multipart", "macros"] }
 tokio = { version = "1", features = ["full"] }
 tower-http = { version = "0.3", features = ["cors", "catch-panic", "trace"] }
+tower-layer = { version = "0.3" }
 futures = "0.3"
 tokio-stream = "0.1"
 tokio-serial = "5.4"
@@ -29,3 +30,4 @@ anyhow = { version = "1.0.71", features = ["backtrace"] }
 tracing-subscriber = { version = "0.3.17" }
 system_shutdown = "4.0.1"
 tokio-util = { version = "0.7.8", features = ["io"] }
+tempdir = "0.3.7"

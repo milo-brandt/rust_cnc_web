@@ -32,6 +32,7 @@ async fn main() {
         .arg("../test_data")
         .env("RUST_LOG", "tower_http=trace")
         .env("RUST_BACKTRACE", "full")
+        .env("NO_SHUTDOWN", "1")
         .spawn()
         .unwrap();
     select! {

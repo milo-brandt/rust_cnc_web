@@ -17,6 +17,7 @@ pub enum HttpMethod {
     Get,
     Post,
     Delete,
+    Put,
 }
 impl HttpMethod {
     fn request_url(&self, path: &str) -> Request {
@@ -24,6 +25,7 @@ impl HttpMethod {
         match self {
             HttpMethod::Get => Request::get(&true_path),
             HttpMethod::Post => Request::post(&true_path),
+            HttpMethod::Put => Request::put(&true_path),
             HttpMethod::Delete => Request::delete(&true_path),
         }
     }

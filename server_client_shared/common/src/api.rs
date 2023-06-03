@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use chrono::Utc;
 use serde::{Serialize, Deserialize};
 
@@ -93,31 +95,57 @@ pub const RAPID_OVERRIDE: RapidOverride = RapidOverride {
     half: "/command/override/rapid/half",
     quarter: "/command/override/rapid/quarter",
 };
-//////
-// Coordinate management
-//////
-#[derive(Serialize, Deserialize)]
-pub struct SaveCoordinateOffset {
-    pub name: String,
-}
-#[derive(Serialize, Deserialize)]
-pub struct RestoreCoordinateOffset {
-    pub name: String,
-}
-#[derive(Serialize, Deserialize)]
-pub struct DeleteCoordinateOffset {
-    pub name: String,
-}
-pub const SAVE_COORDINATE_OFFSET: &str = "/coordinates/save";
-pub const LIST_COORDINATE_OFFSETS: &str = "/coordinates/list";
-pub const RESTORE_COORDINATE_OFFSET: &str = "/coordinates/restore";
-pub const DELETE_COORDINATE_OFFSET: &str = "/coordinates/delete";
-
 ///////
 // MISC
 ///////
 
 pub const SHUTDOWN: &str = "/shutdown";
+
+
+/*
+Schema for storing offset data. We imagine that there is some set of coordinates fixed to the bed of the machine,
+called bed coordinates. We then consider two sorts of offsets:
+1. Offsets from the machine coordinates to the bed coordinates; adding such an offset should model the coordinate
+   transformation of taking a position in machine coordinates and mapping to the position of the tool's end in bed
+   coordinates.
+2. Offsets from the bed to the workpiece; adding such an offset should transform bed coordinates to a workpiece's
+   local coordinates.
+Generally, we expect tool coordinates to be consistent except for the Z height and bed coordinates to vary. This
+can express the ideas of having multiple spindles pretty easily.
+*/
+#[derive(Serialize, Deserialize, Clone, PartialEq)]
+#[serde(transparent)]
+pub struct Vec3(pub [f64; 3]);
+#[derive(Serialize, Deserialize, Default, Clone)]
+pub struct Offsets {
+    pub tools: HashMap<String, Vec3>,
+    pub workpieces: HashMap<String, Vec3>,
+}
+#[derive(Serialize, Deserialize)]
+pub enum OffsetKind {
+    Tool,  // Machine coordinates -> Bed coordinates (via tool)
+    Workpiece, // Bed coordinates -> Work coordinates
+}
+#[derive(Serialize, Deserialize)]
+pub struct SetCoordinateOffset {
+    pub name: String,
+    pub offset_kind: OffsetKind,
+    pub offset: Vec3,
+}
+#[derive(Serialize, Deserialize)]
+pub struct DeleteCoordinateOffset {
+    pub name: String,
+    pub offset_kind: OffsetKind,
+}
+
+#[derive(Clone, Serialize, Deserialize)]
+pub struct SavedPosition {
+    pub label: String,
+    pub position: Vec3,
+}
+
+pub const OFFSETS: &str = "/coords/offsets";
+pub const POSITIONS: &str = "/coords/positions";
 
 /*
 post! {

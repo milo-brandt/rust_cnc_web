@@ -232,10 +232,10 @@ where
             match head {
                 "Idle" => Box::new(success(GrblState::Idle)),
                 "Run" => Box::new(success(GrblState::Run)),
-                "Hold" => Box::new(parse_i64.map(GrblState::Hold)),
+                "Hold" => Box::new(parse_i64.map(|code| GrblState::Hold { code })),
                 "Jog" => Box::new(success(GrblState::Jog)),
                 "Alarm" => Box::new(success(GrblState::Alarm)),
-                "Door" => Box::new(parse_i64.map(GrblState::Door)),
+                "Door" => Box::new(parse_i64.map(|code| GrblState::Door { code })),
                 "Check" => Box::new(success(GrblState::Check)),
                 "Home" => Box::new(success(GrblState::Home)),
                 "Sleep" => Box::new(success(GrblState::Sleep)),

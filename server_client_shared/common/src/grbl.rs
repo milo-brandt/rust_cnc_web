@@ -2,13 +2,14 @@ use serde::{Serialize, Deserialize};
 
 // See: the Real-time Status Reports section at:  https://github.com/gnea/grbl/blob/master/doc/markdown/interface.md
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type")]
 pub enum GrblState {
     Idle,
     Run,
-    Hold(i64),
+    Hold { code: i64 },
     Jog,
     Alarm,
-    Door(i64),
+    Door { code: i64 },
     Check,
     Home,
     Sleep,

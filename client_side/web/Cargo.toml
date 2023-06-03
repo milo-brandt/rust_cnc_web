@@ -40,3 +40,4 @@ js-sys = "0.3.60"
 quaternion-core = "0.3"
 itertools = "0.10"
 chrono = { version = "0.4.24", features = ["serde", "wasmbind"] }
+anyhow = "1.0.71"

@@ -166,7 +166,7 @@ pub fn LeftStatusHeader(cx: Scope) -> View<DomNode> {
     log::debug!("CSS class: {}", css_style.get_class_name());
     let global_info: &GlobalInfo = use_context(cx);
     let in_motion = create_selector(cx, || {
-        (&*global_info.grbl_info.get()).as_ref().map_or(true, |v| if let GrblState::Hold(_) = v.state { false } else { true })
+        (&*global_info.grbl_info.get()).as_ref().map_or(true, |v| if let GrblState::Hold{..} = v.state { false } else { true })
     });
     let on_click = create_ref(cx, || {
         let url = if *in_motion.get() {
@@ -203,10 +203,10 @@ pub fn LeftStatusHeader(cx: Scope) -> View<DomNode> {
             match v.state {
                 GrblState::Idle => false,
                 GrblState::Run => false,
-                GrblState::Hold(_) => true,
+                GrblState::Hold{..} => true,
                 GrblState::Jog => false,
                 GrblState::Alarm => false,
-                GrblState::Door(_) => true,
+                GrblState::Door{..} => true,
                 GrblState::Check => true,
                 GrblState::Home => true,
                 GrblState::Sleep => true,
@@ -238,10 +238,10 @@ pub fn LeftStatusHeader(cx: Scope) -> View<DomNode> {
             match v.state {
                 GrblState::Idle => false,
                 GrblState::Run => false,
-                GrblState::Hold(_) => false,
+                GrblState::Hold{..} => false,
                 GrblState::Jog => false,
                 GrblState::Alarm => true,
-                GrblState::Door(_) => true,
+                GrblState::Door{..} => true,
                 GrblState::Check => true,
                 GrblState::Home => true,
                 GrblState::Sleep => true,

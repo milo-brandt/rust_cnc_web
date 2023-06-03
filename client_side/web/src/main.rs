@@ -6,12 +6,12 @@ mod gcode_job_page;
 mod jog_page;
 mod display_page;
 mod request;
-mod coordinate_page;
 mod components;
+mod models;
+mod coords_page;
 pub mod render;
 
 use common::api;
-use coordinate_page::CoordinatePage;
 use display_page::DisplayPage;
 use gloo_timers::future::sleep;
 use jog_page::JogPage;
@@ -49,6 +49,7 @@ use debug_page::DebugPage;
 use crate::components::modal_wrapper::ModalWrapper;
 use crate::components::modal_wrapper::install_modal_handler;
 use crate::components::modal_wrapper::use_modal_handler;
+use crate::coords_page::CoordinatePage;
 
 #[derive(Route)]
 enum AppRoutes {

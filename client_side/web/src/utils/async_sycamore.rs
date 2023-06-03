@@ -1,3 +1,4 @@
+use sycamore::futures::spawn_local_scoped;
 use sycamore::prelude::*;
 use wasm_bindgen_futures::spawn_local;
 use std::future::Future;
@@ -71,3 +72,23 @@ pub fn create_reducer<'a, T: Clone, R: Reducer<T> + 'a>(cx: Scope<'a>, value: T,
     });
     (RcReducer(event_rc_clone), value)
 }*/
+
+pub fn loading_view<'a>(cx: Scope<'a>, loading: View<DomNode>, future: impl Future<Output=View<DomNode>> + 'a) -> View<DomNode>
+{
+    let node = create_signal(cx, loading);
+    spawn_local_scoped(cx, async move {
+        node.set(future.await);
+    });
+    View::new_dyn(cx, || node.get().as_ref().clone())
+}
+pub fn try_loading_view<'a, E>(cx: Scope<'a>, loading: View<DomNode>, error_view: impl FnOnce(E) -> View<DomNode> + 'a, future: impl Future<Output=Result<View<DomNode>, E>> + 'a) -> View<DomNode>
+{
+    let node = create_signal(cx, loading);
+    spawn_local_scoped(cx, async move {
+        node.set(match future.await {
+            Err(err) => error_view(err),
+            Ok(view) => view
+        })
+    });
+    View::new_dyn(cx, || node.get().as_ref().clone())
+}

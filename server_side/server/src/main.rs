@@ -1,13 +1,14 @@
 #![allow(dead_code)]
 
-use std::{sync::Mutex, convert::Infallible, thread, collections::HashMap, borrow::Borrow, path::{PathBuf, Path}, fs::FileType};
+use std::{sync::Mutex, convert::Infallible, thread, collections::HashMap, borrow::Borrow, path::{PathBuf, Path}, fs::FileType, env};
 
-use axum::{response::{sse::Event, Sse}, extract::{multipart::Field, ContentLengthLimit, self}, handler::Handler, body::{StreamBody, BoxBody}};
+use axum::{response::{sse::Event, Sse}, extract::{multipart::Field, self, DefaultBodyLimit}, handler::Handler, body::{StreamBody, BoxBody}, routing::MethodRouter};
 use cnc::{grbl::{messages::{GrblStateInfo}, standard_handler::{StandardHandler, ImmediateHandle, MachineDebugEvent, ImmediateMessage, JobHandle}, new_machine::run_machine_with_handler}, stream_job::sized_stream_to_job, gcode::{geometry::{as_lines_simple, as_lines_from_best_start}, AxisValues}};
 use futures::{Stream, Future, pin_mut};
-use hyper::server;
+use hyper::{server, Body};
 use paths::lexically_normal_path;
 use serde::Serialize;
+use tempdir::TempDir;
 use tokio::{sync::{mpsc, broadcast, watch}, spawn, time::MissedTickBehavior, io::AsyncWriteExt, fs::{read_dir, remove_file, create_dir_all, remove_dir_all, rename}};
 use chrono::{offset::Local, Utc};
 use cnc::machine_writer::BufferCountingWriter;
@@ -16,6 +17,7 @@ mod paths;
 mod server_result;
 mod util;
 mod oneway_websocket;
+mod coordinates;
 use oneway_websocket::send_stream;
 use tokio::runtime::{Runtime, Builder};
 use tokio_util::io::{StreamReader, ReaderStream};
@@ -36,7 +38,7 @@ struct Args {
     data_folder: String,
 }
 
-struct Config {
+pub struct Config {
     data_folder: PathBuf
 }
 
@@ -163,18 +165,18 @@ async fn status_stream_task(machine: Arc<ImmediateHandle>) -> StatusStreamInfo {
     }
 }
 
-fn immediate_command<'a, F, Fut>(action: F) -> impl Handler<(Extension<Arc<ImmediateHandle>>,)>
+fn immediate_command<'a, F, Fut>(action: F) -> MethodRouter<(), Body, Infallible>
 where
     F: Fn(Arc<ImmediateHandle>) -> Fut + Clone + Send + 'static,
     Fut: Future<Output=()> + Send
 {
-    move |machine: Extension<Arc<ImmediateHandle>>| {
+    post(move |machine: Extension<Arc<ImmediateHandle>>| {
         async move {
             let fut = action((*machine).clone());
             fut.await;
             "Ok!".to_string()
         }
-    }
+    })
 }
 
 struct CoordinateOffsets {
@@ -209,43 +211,44 @@ async fn run_server(machine: ImmediateHandle, debug_rx: history_broadcast::Recei
         .route(api::LIST_GCODE_FILES, post(get_gcode_list))
         .route(api::EXAMINE_LINES_IN_GCODE_FILE, post(get_gcode_file_positions))
         .route(&format!("{}/*path", api::DOWNLOAD_GCODE), get(download_gcode_file))
-        
+        .route("/job/list/*path", get(get_gcode_list_better))
+        .route("/job/list/", get(get_gcode_list_better))
+        .route("/job/examine/*path", get(get_gcode_file_positions_better))
+
         .route(api::SEND_RAW_GCODE, post(run_gcode_unchecked))
         .route(api::LISTEN_TO_RAW_MACHINE, get(listen_raw))
         .route(api::LISTEN_TO_JOB_STATUS, get(listen_status))
         .route(api::LISTEN_TO_MACHINE_STATUS, get(listen_position))
         
-        .route(api::COMMAND_PAUSE, post(immediate_command(|handle| async move { handle.pause().await; })))
-        .route(api::COMMAND_RESUME, post(immediate_command(|handle| async move { handle.resume().await; })))
-        .route(api::COMMAND_STOP, post(immediate_command(|handle| async move { handle.stop().await; })))
-        .route(api::COMMAND_RESET, post(immediate_command(|handle| async move { handle.reset().await; })))
+        .route(api::COMMAND_PAUSE, (immediate_command(|handle| async move { handle.pause().await; })))
+        .route(api::COMMAND_RESUME, (immediate_command(|handle| async move { handle.resume().await; })))
+        .route(api::COMMAND_STOP, (immediate_command(|handle| async move { handle.stop().await; })))
+        .route(api::COMMAND_RESET, (immediate_command(|handle| async move { handle.reset().await; })))
 
-        .route(api::FEED_OVERRIDE.reset, post(immediate_command(|handle| async move { handle.override_speed(SpeedOverride::FeedReset).await; })))
-        .route(api::FEED_OVERRIDE.plus_10, post(immediate_command(|handle| async move { handle.override_speed(SpeedOverride::FeedIncrease10).await; })))
-        .route(api::FEED_OVERRIDE.plus_1, post(immediate_command(|handle| async move { handle.override_speed(SpeedOverride::FeedIncrease1).await; })))
-        .route(api::FEED_OVERRIDE.minus_1, post(immediate_command(|handle| async move { handle.override_speed(SpeedOverride::FeedDecrease1).await; })))
-        .route(api::FEED_OVERRIDE.minus_10, post(immediate_command(|handle| async move { handle.override_speed(SpeedOverride::FeedDecrease10).await; })))
+        .route(api::FEED_OVERRIDE.reset, (immediate_command(|handle| async move { handle.override_speed(SpeedOverride::FeedReset).await; })))
+        .route(api::FEED_OVERRIDE.plus_10, (immediate_command(|handle| async move { handle.override_speed(SpeedOverride::FeedIncrease10).await; })))
+        .route(api::FEED_OVERRIDE.plus_1, (immediate_command(|handle| async move { handle.override_speed(SpeedOverride::FeedIncrease1).await; })))
+        .route(api::FEED_OVERRIDE.minus_1, (immediate_command(|handle| async move { handle.override_speed(SpeedOverride::FeedDecrease1).await; })))
+        .route(api::FEED_OVERRIDE.minus_10, (immediate_command(|handle| async move { handle.override_speed(SpeedOverride::FeedDecrease10).await; })))
 
-        .route(api::SPINDLE_OVERRIDE.reset, post(immediate_command(|handle| async move { handle.override_speed(SpeedOverride::SpindleReset).await; })))
-        .route(api::SPINDLE_OVERRIDE.plus_10, post(immediate_command(|handle| async move { handle.override_speed(SpeedOverride::SpindleIncrease10).await; })))
-        .route(api::SPINDLE_OVERRIDE.plus_1, post(immediate_command(|handle| async move { handle.override_speed(SpeedOverride::SpindleIncrease1).await; })))
-        .route(api::SPINDLE_OVERRIDE.minus_1, post(immediate_command(|handle| async move { handle.override_speed(SpeedOverride::SpindleDecrease1).await; })))
-        .route(api::SPINDLE_OVERRIDE.minus_10, post(immediate_command(|handle| async move { handle.override_speed(SpeedOverride::SpindleDecrease10).await; })))
+        .route(api::SPINDLE_OVERRIDE.reset, (immediate_command(|handle| async move { handle.override_speed(SpeedOverride::SpindleReset).await; })))
+        .route(api::SPINDLE_OVERRIDE.plus_10, (immediate_command(|handle| async move { handle.override_speed(SpeedOverride::SpindleIncrease10).await; })))
+        .route(api::SPINDLE_OVERRIDE.plus_1, (immediate_command(|handle| async move { handle.override_speed(SpeedOverride::SpindleIncrease1).await; })))
+        .route(api::SPINDLE_OVERRIDE.minus_1, (immediate_command(|handle| async move { handle.override_speed(SpeedOverride::SpindleDecrease1).await; })))
+        .route(api::SPINDLE_OVERRIDE.minus_10, (immediate_command(|handle| async move { handle.override_speed(SpeedOverride::SpindleDecrease10).await; })))
      
-        .route(api::RAPID_OVERRIDE.reset, post(immediate_command(|handle| async move { handle.override_speed(SpeedOverride::RapidReset).await; })))
-        .route(api::RAPID_OVERRIDE.half, post(immediate_command(|handle| async move { handle.override_speed(SpeedOverride::RapidHalf).await; })))
-        .route(api::RAPID_OVERRIDE.quarter, post(immediate_command(|handle| async move { handle.override_speed(SpeedOverride::RapidQuarter).await; })))
-
-        .route(api::LIST_COORDINATE_OFFSETS, get(list_coordinate_offsets))
-        .route(api::SAVE_COORDINATE_OFFSET, post(save_coordinate_offset))
-        .route(api::RESTORE_COORDINATE_OFFSET, post(restore_coordinate_offset))
-        .route(api::DELETE_COORDINATE_OFFSET, delete(delete_coordinate_offset))
+        .route(api::RAPID_OVERRIDE.reset, (immediate_command(|handle| async move { handle.override_speed(SpeedOverride::RapidReset).await; })))
+        .route(api::RAPID_OVERRIDE.half, (immediate_command(|handle| async move { handle.override_speed(SpeedOverride::RapidHalf).await; })))
+        .route(api::RAPID_OVERRIDE.quarter, (immediate_command(|handle| async move { handle.override_speed(SpeedOverride::RapidQuarter).await; })))
 
         .route(api::SHUTDOWN, post(shutdown))
+
+        .nest("/coords", coordinates::get_service(&config).await.unwrap())
 
         .layer(TraceLayer::new_for_http())
         .layer(CatchPanicLayer::new())
         .layer(cors)
+        .layer(DefaultBodyLimit::max(10_000_000))
         .layer(Extension(machine_arc.clone()))
         .layer(Extension(Arc::new(debug_rx)))
         .layer(Extension(Arc::new(status_stream_task(machine_arc).await)))
@@ -332,8 +335,8 @@ fn default_settings() -> GCodeFormatSpecification {
 }
 async fn run_gcode_unchecked(
     // Runs the line *if* no job is scheduled yet.
-    message: RawBody,
     machine: Extension<Arc<ImmediateHandle>>,
+    message: RawBody,
 ) -> String {
     let mut body_bytes = hyper::body::to_bytes(message.0).await.unwrap().to_vec();
     body_bytes.push(b'\n');
@@ -363,7 +366,7 @@ async fn download_gcode_file(
     path: extract::Path<String>,
     config: Extension<Arc<Config>>,
 ) -> ServerResult<Response> {
-    let path = config.gcode_path(&path[1..])?;
+    let path = config.gcode_path(&*path)?;
     let file = File::open(path).await?;
     let body = BoxBody::new(StreamBody::new(ReaderStream::new(file)));
     /* */
@@ -375,8 +378,8 @@ async fn download_gcode_file(
 }
 
 async fn get_gcode_file_positions(
-    message: Json<api::ExamineGcodeFile>,
     config: Extension<Arc<Config>>,
+    message: Json<api::ExamineGcodeFile>,
 ) -> ServerResult<Json<Vec<[f32; 3]>>> {
     let mut program = Vec::new();
 
@@ -414,10 +417,51 @@ async fn get_gcode_file_positions(
     Ok(Json(lines.iter().map(axis_value_to_array).collect()))
 } 
 
+async fn get_gcode_file_positions_better(
+    config: Extension<Arc<Config>>,
+    path: extract::Path<String>,
+) -> ServerResult<Json<Vec<[f32; 3]>>> {
+    let mut program = Vec::new();
+    let path = config.gcode_path(&*path)?;
+    /*
+        A lot of code duplication; should perhaps make an iterator that just reads through a 
+        GCode file and parses it... (or Stream I guess?)
+    */
+    let file = match File::open(path).await {
+        Ok(file) => file,
+        Err(e) => return Err(anyhow!("Error! {:?}", e).into()),
+    };
+    let file = BufReader::new(file);
+    let mut lines = file.lines();
+    let spec = default_settings();
+    loop {
+        match lines.next_line().await {
+            Ok(Some(line)) => {
+                match parse_generalized_line(&spec, &line) {
+                    Ok(GeneralizedLine::Line(line)) => {
+                        program.push(line);
+                    }
+                    Ok(_) => {}
+                    Err(e) => return Err(anyhow!("Error! {:?}", e).into()),
+                }
+            }
+            Ok(None) => break,
+            Err(e) => return Err(anyhow!("Error: {:?}", e).into()),
+        }
+    }
+    let lines = as_lines_from_best_start(&program);
+    let lines = match lines {
+        Err(e) => return Err(anyhow!("Error! {:?}", e).into()),
+        Ok(lines) => lines,
+    };
+    Ok(Json(lines.iter().map(axis_value_to_array).collect()))
+} 
+
+
 async fn run_gcode_file(
-    message: Json<api::RunGcodeFile>,
     machine: Extension<Arc<ImmediateHandle>>,
     config: Extension<Arc<Config>>,
+    message: Json<api::RunGcodeFile>,
 ) -> ServerResult<String> {
     let path = config.gcode_path(&message.path)?;
     let spec = default_settings();
@@ -503,32 +547,30 @@ async fn listen_status(ws: WebSocketUpgrade, machine: Extension<Arc<ImmediateHan
 }
 
 
-async fn dump_field_to_file(mut file: File, mut field: Field<'_>) {
-    while let Some(bytes) = field.chunk().await.unwrap() {
-        file.write_all(&bytes).await.unwrap();
+async fn dump_field_to_file(mut file: File, mut field: Field<'_>) -> anyhow::Result<()> {
+    while let Some(bytes) = field.chunk().await? {
+        file.write_all(&bytes).await?
     }
+    Ok(())
 }
 
 // Limits file size to 128 MiB.
-async fn upload(multipart: ContentLengthLimit<Multipart, 134217728>, config: Extension<Arc<Config>>) -> ServerResult<String> {
-    let mut multipart = multipart.0;
+async fn upload(config: Extension<Arc<Config>>, mut multipart: Multipart) -> ServerResult<String> {
     let mut file_name = None::<PathBuf>;
+    let tmp_dir = TempDir::new("file_download")?;
+    let tmp_path = tmp_dir.path().join("file");
+    let mut has_file = false;
     while let Some(field) = multipart.next_field().await.unwrap() {
         let name = field.name().unwrap().to_string();
         if name == "file" {
-            match file_name.take() {
-                None => return Err(anyhow!("Filename not given before file!").into()),
-                Some(file_name) => {
-                    create_dir_all(
-                        file_name.parent().ok_or(anyhow!("Cannot specify top level as filename!"))?
-                    ).await?;
-                    dump_field_to_file(
-                        File::create(file_name).await.unwrap(),
-                        field
-                    ).await;
-                }
+            if(has_file) {
+                return Err(anyhow!("Multiple files given!").into());
             }
-            return Ok("Uploaded!".to_string());
+            has_file = true;
+            dump_field_to_file(
+                File::create(tmp_path.clone()).await?,
+                field
+            ).await?;
         } else if name == "filename" {
             let presumptive_name = field.text().await?;
             file_name = Some(
@@ -536,13 +578,21 @@ async fn upload(multipart: ContentLengthLimit<Multipart, 134217728>, config: Ext
             );
         }
     }
-    Err(ServerError::bad_request("File not given!".into()))
+    if !has_file {
+        return Err(anyhow!("No file given!").into());
+    }
+    let file_name = file_name.ok_or_else(|| anyhow!("No filename given!"))?;
+    // This is not quite right... but it's probably fine
+    let directory = file_name.parent().ok_or(anyhow!("Cannot specify top level as filename!"))?;
+    create_dir_all(directory).await?;
+    rename(tmp_path, file_name).await?;
+    Ok("Uploaded!".into())
 }
-async fn create_directory(info: Json<api::CreateGcodeDirectory>, config: Extension<Arc<Config>>) -> ServerResult<String> {
+async fn create_directory(config: Extension<Arc<Config>>, info: Json<api::CreateGcodeDirectory>) -> ServerResult<String> {
     create_dir_all(config.gcode_path(&info.directory)?).await?;
     Ok("Ok".to_string())
 }
-async fn delete_file(info: Json<api::DeleteGcodeFile>, config: Extension<Arc<Config>>) -> ServerResult<String> {
+async fn delete_file(config: Extension<Arc<Config>>, info: Json<api::DeleteGcodeFile>) -> ServerResult<String> {
     let old_path = config.gcode_path(&info.path)?;
     if old_path == PathBuf::new() {
         return Err(ServerError::bad_request("cannot delete root directory".to_string()));
@@ -562,7 +612,7 @@ async fn delete_file(info: Json<api::DeleteGcodeFile>, config: Extension<Arc<Con
     Ok("Ok".to_string())
 }
 
-async fn get_gcode_list(info: Json<api::ListGcodeFiles>, config: Extension<Arc<Config>>) -> ServerResult<Json<Vec<api::GcodeFile>>> {
+async fn get_gcode_list(config: Extension<Arc<Config>>, info: Json<api::ListGcodeFiles>) -> ServerResult<Json<Vec<api::GcodeFile>>> {
     let mut entries = read_dir(config.gcode_path(&info.prefix)?).await?;
     let mut values = Vec::new();
     while let Some(entry) = entries.next_entry().await.unwrap() {
@@ -574,56 +624,26 @@ async fn get_gcode_list(info: Json<api::ListGcodeFiles>, config: Extension<Arc<C
     values.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(Json(values))
 }
-
+async fn get_gcode_list_better(path: Option<extract::Path<String>>, config: Extension<Arc<Config>>) -> ServerResult<Json<Vec<api::GcodeFile>>> {
+    let mut entries = read_dir(config.gcode_path(path.as_ref().map_or("", |path| path.as_str()))?).await?;
+    let mut values = Vec::new();
+    while let Some(entry) = entries.next_entry().await.unwrap() {
+        values.push(api::GcodeFile {
+            name: entry.file_name().into_string().unwrap(),
+            is_file: entry.file_type().await?.is_file(),
+        });
+    }
+    values.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(Json(values))
+}
 
 async fn shutdown() -> String {
-    match system_shutdown::shutdown() {
-        Ok(()) => "Bye!".to_string(),
-        Err(err) => format!("Failed: {:?}", err),
-    }
-}
-
-async fn list_coordinate_offsets(coordinates: Extension<Arc<CoordinateOffsets>>) -> Json<Vec<String>> {
-    Json(coordinates.offsets.lock().unwrap().keys().cloned().collect_vec())
-}
-async fn save_coordinate_offset(
-    coordinates: Extension<Arc<CoordinateOffsets>>,
-    machine: Extension<Arc<ImmediateHandle>>,
-    request: Json<api::SaveCoordinateOffset>,
-) -> String {
-    let state = machine.get_state().await;
-    let wco = state.work_coordinate_offset.into_iter().collect_vec();
-    coordinates.offsets.lock().unwrap().insert(request.name.clone(), wco);
-    "ok".into()
-}
-async fn delete_coordinate_offset(
-    coordinates: Extension<Arc<CoordinateOffsets>>,
-    request: Json<api::DeleteCoordinateOffset>,
-) -> String {
-    coordinates.offsets.lock().unwrap().remove(&request.name);
-    "ok".into()
-}
-async fn restore_coordinate_offset(
-    coordinates: Extension<Arc<CoordinateOffsets>>,
-    machine: Extension<Arc<ImmediateHandle>>,
-    request: Json<api::RestoreCoordinateOffset>,
-) -> String {
-    let coords = coordinates.offsets.lock().unwrap().get(&request.name).cloned();
-    match coords {
-        None => return "no such".into(),
-        Some(coords) => {
-            let result =     machine.try_send_job(move |job_handle| async move {
-                unsafe {
-                    let result = job_handle.send_gcode_raw(format!("G10 L2 X{} Y{} Z{}\n", coords[0], coords[1], coords[2]).bytes().collect_vec()).await;
-                    if let Ok(result) = result {
-                        drop(result.await);
-                    }
-                }
-            }).await;
-            match result {
-                Ok(_) => "ok".into(),
-                Err(_) => "busy".into(),
-            }
+    if env::var("NO_SHUTDOWN") == Ok("1".to_string()) {
+        format!("Shutdown disabled!")
+    } else {
+        match system_shutdown::shutdown() {
+            Ok(()) => "Bye!".to_string(),
+            Err(err) => format!("Failed: {:?}", err),
         }
     }
 }

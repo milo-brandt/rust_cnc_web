@@ -3,7 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { PageLoading, PageErrored } from "./ErrorState";
 import { flatten, groupBy } from "lodash";
 import { Box, Button, DialogContentText, IconButton, Paper, TableCell, TableContainer, TableRow, TextField, Tooltip, Typography } from "@mui/material";
-import { ArrowUpward, CreateNewFolder, Delete, Download, Folder, MoveUp, PlayArrow, Search, UploadFile } from "@mui/icons-material";
+import { ArrowUpward, CreateNewFolder, Delete, Download, Folder, PlayArrow, Search, UploadFile } from "@mui/icons-material";
 import { useStatusContext } from "./context/status";
 import { useSnackbar } from "./context/snackbar";
 import { useDialog } from "./context/modal";

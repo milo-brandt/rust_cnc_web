@@ -73,7 +73,6 @@ export function useGet<T>(path: string): ReloadablePromiseResult<T> {
     result: useCancellablePromise(
       useMemo(
         () => async (signal: AbortSignal) => {
-          // console.log("STARTING PROMISE");
           // await new Promise(resolve => setTimeout(resolve, 500));
           let result = await cncAxios.get<T>(path, { signal });
           return result.data;
@@ -82,7 +81,6 @@ export function useGet<T>(path: string): ReloadablePromiseResult<T> {
       )
     ),
     reload: () => {
-      console.log("RELAODING!");
       setGeneration(generation + 1)
     }
   }

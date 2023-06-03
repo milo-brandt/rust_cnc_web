@@ -1,13 +1,14 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useMemo, useReducer, useRef, useState } from "react";
 import { PageErrored, PageLoading } from "./ErrorState";
 import { useGet } from "./api/generic";
 import { useParams } from "react-router-dom";
 import { Maybe } from "./util/types";
-import { flatten, isEqual, mapValues, max, min, range, round, sum } from "lodash";
-import { Box, Button, Checkbox, Collapse, Fade, Grow, IconButton, Paper, Slide, Slider, Typography } from "@mui/material";
+import { flatten, mapValues, max, min, range, round, sum } from "lodash";
+import { Box, Checkbox, Grow, IconButton, Paper, Slider, Typography } from "@mui/material";
 import { Matrix } from "ts-matrix";
 import Quaternion from "quaternion";
-import { ExpandLess, Info, Work } from "@mui/icons-material";
+import { Info, PlayArrow, Work } from "@mui/icons-material";
+import { Canvas, contextCached } from "./Canvas";
 
 const VERTEX_SHADER_CODE = "#version 300 es\n\
 uniform mat4x4 transformation;\n\
@@ -69,7 +70,7 @@ function setupProgram(context: WebGL2RenderingContext) {
   );
   return program
 }
-function setupCanvas(context: WebGL2RenderingContext) {
+function setupContext(context: WebGL2RenderingContext) {
   context.enable(context.BLEND);
   context.blendFunc(context.SRC_ALPHA, context.ONE_MINUS_SRC_ALPHA)
   const program = setupProgram(context);
@@ -113,26 +114,52 @@ export function ViewPage() {
     directory = directory.slice(0, directory.length - 1);
   }
   const { result: lineResult } = useGet<Array<[number, number, number]>>(`/job/examine/${directory}`);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const pointsOld: Array<[number, number, number]> = [
-    [-1, -1, 2],
-    [-1, 1, 2],
-    [1, 1, 2],
-    [1, -1, 3],
-  ];
-  const pointsRef = useRef<Array<[number, number, number]>>(pointsOld);
-  pointsRef.current = lineResult.status == "resolved" ? lineResult.data : pointsOld;
-  const [dragBounds, setDragBounds] = useState<[number, number] | null>(null);
-  const [bounds, setBounds] = useState<{min: [number, number, number], max: [number, number, number]} | null>(null);
+  /*
+    
+  */
+  const pointMetadata = useMemo(() => {
+    if(lineResult.status == "resolved" && lineResult.data.length > 0) {
+      const points = lineResult.data;
+      const bounds = boundsOf(lineResult.data);
+      const pointsWithTravel = points.slice(1).reduce(({ distance, items }, next) => {
+        const lastPoint = items[items.length - 1];
+        const segmentDistance = Math.sqrt(sum(range(3).map(index => (lastPoint[index] - next[index]) ** 2)));
+        const nextDistance = distance + segmentDistance;
+        items.push([...next, nextDistance]);
+        return {
+          distance: nextDistance,
+          items,
+        }
+      }, { distance: 0, items: [[...points[0], 0]] as Array<[number, number, number, number]> });
+      const maxRange = Math.sqrt(sum(range(3).map(index => (bounds.max[index] - bounds.min[index])**2))!);
+      const center = range(3).map(index => (bounds.min[index] + bounds.max[index])/2);
+
+      return {
+        bounds,
+        maxRange,
+        center,
+        pointsWithTravel: pointsWithTravel.items,
+        totalTravel: pointsWithTravel.distance,
+      };
+    } else {
+      return null;
+    }
+  }, [lineResult]);
+  const dragBounds = pointMetadata ? [pointMetadata.bounds.min[2], pointMetadata.bounds.max[2]] : null;
   function displayBound(index: number, name: string) {
     return (<>
-       <Box textAlign="right">{ bounds?.min?.[index]?.toFixed(2) ?? '?' } { "<" }</Box> <Box ml={0.5}>{ name }</Box> <Box>{ "<" } { bounds?.max?.[index]?.toFixed(2) ?? '?' }</Box>
+       <Box textAlign="right">{ pointMetadata?.bounds?.min?.[index]?.toFixed(2) ?? '?' } { "<" }</Box> <Box ml={0.5}>{ name }</Box> <Box>{ "<" } { pointMetadata?.bounds?.max?.[index]?.toFixed(2) ?? '?' }</Box>
     </>)
   }
-  const [travelLength, setTravelLength] = useState<number | null>(null);
+  const travelLength = pointMetadata?.totalTravel ?? null;
   const [zPosition, setZPosition] = useState<number | null>(null);
   const [travelPosition, setTravelPosition] = useState<number | null>(null);
-  const [showInfo, setShowInfo] = useState(false);
+  const [zoom, multiplyZoom] = useReducer((previous: number, next: number) => previous * next, 1);
+  let [rotation, multiplyRotation] = useReducer((state: Quaternion, change: Quaternion) => {
+    return change.mul(state).normalize();
+  }, new Quaternion());
+  const dragging = useRef(false);
+
   const zPositionRef = useRef<number | null>(null);
   zPositionRef.current = zPosition;
   const travelRef = useRef<number | null>(null);
@@ -146,99 +173,80 @@ export function ViewPage() {
       setOpenTabRaw(null);
     }
   }
+  //
+  const getCanvasInfo = useCallback(contextCached(setupContext), []);
+  const activateProgram = useCallback((context: WebGL2RenderingContext) => {
+    const canvasInfo = getCanvasInfo(context);
+    context.useProgram(canvasInfo.program);
+    return canvasInfo;  
+  }, []);
+  const preparePoints = useCallback(contextCached(context => {
+    const canvasInfo = getCanvasInfo(context);
+    const buffer = context.createBuffer();
+    context.bindBuffer(context.ARRAY_BUFFER, buffer);
+    const bufferData = new Float32Array(
+      pointMetadata?.pointsWithTravel?.flatMap(arr => arr) ?? []
+    );
+    context.bufferData(context.ARRAY_BUFFER, bufferData, context.STATIC_DRAW);
+    const vao = context.createVertexArray()!;
+    context.bindVertexArray(vao);
+    context.vertexAttribPointer(canvasInfo.attributeLocations.input.position, 3, context.FLOAT, false, 4 * 4, 0);
+    context.vertexAttribPointer(canvasInfo.attributeLocations.input.distance, 1, context.FLOAT, false, 4 * 4, 3 * 4);
+    context.enableVertexAttribArray(canvasInfo.attributeLocations.input.position);
+    context.enableVertexAttribArray(canvasInfo.attributeLocations.input.distance);
+    return {
+      draw: () => {
+        context.bindVertexArray(vao);
+        context.bindBuffer(context.ARRAY_BUFFER, buffer);
+        context.drawArrays(context.LINE_STRIP, 0, pointMetadata?.pointsWithTravel?.length ?? 0);
+      }
+    }
+  }), [pointMetadata]);
 
-  useEffect(() => {
-    let isActive = true;
-    let canvasInfo: Maybe<ReturnType<typeof setupCanvas>> = null;
-    let position = new Quaternion();
-    let zoom = 1;
-    let lastDragBounds = dragBounds;
-    let lastTravelLength = travelLength;
-    let dragging = false;
-    let lastContext: WebGL2RenderingContext | null = null;
-    function render() {
-      if(canvasRef.current === null) {
+
+  const setupCanvas = useCallback((canvas: HTMLCanvasElement) => {
+    canvas.onwheel = event => {
+      if(event.deltaY > 0) {
+        multiplyZoom(0.8);
+      } else {
+        multiplyZoom(1 / 0.8);
+      }
+    };
+    canvas.onmousedown = event => {
+      if (event.buttons & 1) {
+        dragging.current = true;
+      }
+    }
+    canvas.onmousemove = event => {
+      if (dragging.current && (event.buttons & 1)) {
+        const factor = 0.001;
+        const change = new Quaternion(0, -event.movementY * factor, -event.movementX * factor, 0).exp()
+        multiplyRotation(change);
+      } else if(dragging.current) {
+        // TODO: Mouse up should track globally...
+        dragging.current = false;
+      }
+    };
+  }, []);
+
+  const render = useMemo(() => {
+    if(lineResult.status !== "resolved" || lineResult.data.length === 0) {
+      return () => {};
+    }
+    function render(context: WebGL2RenderingContext, canvas: HTMLCanvasElement) {
+      if(!pointMetadata) {
         return;
       }
-      const context = canvasRef.current.getContext("webgl2");
-      if(!context) {
-        return;
-      }
-      if(context != lastContext) {
-        console.log("CONTEXT CHANGED!!")
-        lastContext = context;
-        canvasInfo = null;
-      }
-      if(canvasInfo === null) {
-        canvasInfo = setupCanvas(context);
-        canvasRef.current.onmousedown = event => {
-          if (event.buttons & 1) {
-            dragging = true;
-          }
-        }
-        canvasRef.current.onmousemove = event => {
-          if (dragging && (event.buttons & 1)) {
-            const factor = 0.001;
-            const change = new Quaternion(0, -event.movementY * factor, -event.movementX * factor, 0).exp()
-            position = change.mul(position).normalize();
-          } else if(dragging) {
-            // TODO: Mouse up should track globally...
-            dragging = false;
-          }
-        };
-        canvasRef.current.onwheel = event => {
-          if(event.deltaY > 0) {
-            zoom *= 0.8;
-          } else {
-            zoom /= 0.8;
-          }
-        };
-      }
-      /*const points: Array<[number, number, number]> = [// pointsRef.current; 
-        [0, 0, 0],
-        [0, 1, 0],
-        [1, 0, 0],
-        [0, -1, 0],
-        [-1, 0, 0],
-        [0, 1, 1],
-        [1, 0, 1],
-        [0, -1, 1],
-        [-1, 0, 1],
-        [0, 1, 2],
-        [1, 0, 2],
-        [0, -1, 2],
-        [-1, 0, 2],
-        [0, 1, 3],
-        [1, 0, 3],
-        [0, -1, 3],
-        [-1, 0, 3],
-        [0, 1, 4],
-        [1, 0, 4],
-        [0, -1, 4],
-        [-1, 0, 4],
-      ];*/
-      const points = pointsRef.current;
-      if(points.length === 0) {
-        return;
-      }
-      const width = canvasRef.current?.clientWidth!;
-      const height = canvasRef.current?.clientHeight!;
+      const canvasInfo = activateProgram(context);
+      const width = canvas.clientWidth;
+      const height = canvas.clientHeight;
       const aspect = width / height;
-      canvasRef.current!.width = width;
-      canvasRef.current!.height = height;
+      canvas.width = width;
+      canvas.height = height;
       context.viewport(0, 0, width, height);
-      context.useProgram(canvasInfo.program);
-      const bounds = boundsOf(points);
-      const zBounds: [number, number] = [bounds.min[2], bounds.max[2]]
-      if(!isEqual(zBounds, lastDragBounds)) {
-        lastDragBounds = zBounds;
-        setDragBounds(zBounds);
-        setZPosition(zBounds[1]);
-        setBounds(bounds);
-      }
-
-      const maxRange = Math.sqrt(sum(range(3).map(index => (bounds.max[index] - bounds.min[index])**2))!);
-      const center = range(3).map(index => (bounds.min[index] + bounds.max[index])/2);
+      //context.useProgram(canvasInfo.program);
+      const center = pointMetadata.center;
+      const maxRange = pointMetadata.maxRange;
       //
       const translateAroundZero = new Matrix(4, 4, [
         [1, 0, 0, -center[0]],
@@ -252,7 +260,7 @@ export function ViewPage() {
         [0, 0, -2 / maxRange, 0],
         [0, 0, 0, 1],
       ])
-      const rotate = new Matrix(4, 4, position.toMatrix4(true))
+      const rotate = new Matrix(4, 4, rotation.toMatrix4(true))
       const translateToOneToThree = new Matrix(4, 4, [
         [1, 0, 0, 0],
         [0, 1, 0, 0],
@@ -273,54 +281,15 @@ export function ViewPage() {
         .multiply(translateAroundZero)
       )
 
-      const pointsWithTravel = points.slice(1).reduce(({ distance, items }, next) => {
-        const lastPoint = items[items.length - 1];
-        const segmentDistance = Math.sqrt(sum(range(3).map(index => (lastPoint[index] - next[index]) ** 2)));
-        const nextDistance = distance + segmentDistance;
-        items.push([...next, nextDistance]);
-        return {
-          distance: nextDistance,
-          items,
-        }
-      }, { distance: 0, items: [[...points[0], 0]] as Array<[number, number, number, number]> });
-      if(lastTravelLength != pointsWithTravel.distance) {
-        setTravelLength(pointsWithTravel.distance);
-        lastTravelLength = pointsWithTravel.distance;
-      }
-
-      context.uniformMatrix4fv(canvasInfo.attributeLocations.uniform.transformation, true, /*[
-        1 / aspect, 0, 0, 0,
-        0, 1, 0, 0,
-        0, 0, 1, 0,
-        0, 0, 1, 1,
-      ]*/ flattenMatrix(combined));
-      context.uniform1f(canvasInfo.attributeLocations.uniform.depthCutoff, (zPositionRef.current ?? zBounds[1]) + 0.001);
-      context.uniform1f(canvasInfo.attributeLocations.uniform.distanceCutoff, travelRef.current ?? pointsWithTravel.distance);
-      context.bindBuffer(context.ARRAY_BUFFER, canvasInfo.buffer);
-      const bufferData = new Float32Array(
-        pointsWithTravel.items.flatMap(arr => arr)
-      );
-      context.bufferData(context.ARRAY_BUFFER, bufferData, context.STATIC_DRAW);
-      const vao = context.createVertexArray()!;
-      context.bindVertexArray(vao);
-      context.vertexAttribPointer(canvasInfo.attributeLocations.input.position, 3, context.FLOAT, false, 4 * 4, 0);
-      context.vertexAttribPointer(canvasInfo.attributeLocations.input.distance, 1, context.FLOAT, false, 4 * 4, 3 * 4);
-      context.enableVertexAttribArray(canvasInfo.attributeLocations.input.position)
-      context.enableVertexAttribArray(canvasInfo.attributeLocations.input.distance)
-      context.bindVertexArray(vao);
+      context.uniformMatrix4fv(canvasInfo.attributeLocations.uniform.transformation, true, flattenMatrix(combined));
+      context.uniform1f(canvasInfo.attributeLocations.uniform.depthCutoff, (zPosition ?? pointMetadata.bounds.max[2]) + 0.001);
+      context.uniform1f(canvasInfo.attributeLocations.uniform.distanceCutoff, travelRef.current ?? pointMetadata.totalTravel);
       context.clearColor(0.0, 0.0, 0.0, 1.0);
       context.clear(context.COLOR_BUFFER_BIT);
-      context.drawArrays(context.LINE_STRIP, 0, points.length);
+      preparePoints(context).draw();
     }
-    function frameCallback() {
-      render();
-      if(isActive) {
-        requestAnimationFrame(frameCallback)
-      }
-    }
-    frameCallback();
-    return () => { isActive = false; }
-  }, []);
+    return render;
+  }, [lineResult, activateProgram, zoom, rotation, pointMetadata, zPosition, preparePoints]);
   
   if(lineResult.status == "loading") {
     return <PageLoading/>
@@ -328,8 +297,7 @@ export function ViewPage() {
     return <PageErrored/>
   } else {
     return <div ref={containerRef} style={{position: "relative", width: "100%", height: "90vh"}}>
-      <canvas ref={canvasRef} style={{width: "100%", height: "100%", position:"absolute"}}>
-      </canvas>
+      <Canvas render={render} setupCanvas={setupCanvas}/>
       { dragBounds !== null && travelLength !== null && <Box position="absolute" bottom="2rem" top="2rem" left="1rem" display="flex" flexDirection="row" color="white">
       <Box display="flex" flexDirection="column" alignItems="center" zIndex={10}>
           <Slider
@@ -353,7 +321,7 @@ export function ViewPage() {
               },
             }}
           />
-          <Box marginTop="1rem">
+          <Box marginTop="1rem" fontWeight="bolder">
             Z
           </Box>
         </Box>
@@ -379,7 +347,7 @@ export function ViewPage() {
               },
             }}
           />
-          <Box marginTop="1rem">
+          <Box marginTop="1rem" fontWeight="bolder">
             T
           </Box>
         </Box>
@@ -402,26 +370,29 @@ export function ViewPage() {
           </Grow>
           <Grow in={openTab === "job"} mountOnEnter={true} unmountOnExit={true}>
             <Paper sx={{p: 1, position: "absolute", bottom: "0rem", right: "0rem", whiteSpace: "nowrap"}}>
-              Run Job: 
+              <Typography variant="h6">Job Execution</Typography>
+              <Box display="flex" alignItems="center" width="100%" justifyContent="flex-end">
+              <em>Run:</em> <IconButton><PlayArrow/> </IconButton>
+              </Box>
             </Paper>
           </Grow>
         </Box>
-        <div>
-        <Checkbox
-            icon={ <Info color="inherit"/> }
-            checkedIcon={ <Info/> }
-            checked={ openTab === "info" }
-            onChange={ (_, checked) => setOpenTab("info", checked) }
-            sx={{color: "white"}}
-          />
+        <Box fontSize="2em">
           <Checkbox
-            icon={ <Work color="inherit"/> }
-            checkedIcon={ <Work/> }
-            checked={ openTab === "job" }
-            onChange={ (_, checked) => setOpenTab("job", checked) }
-            sx={{color: "white"}}
-          />
-        </div>
+              icon={ <Info color="inherit" fontSize="inherit"/> }
+              checkedIcon={ <Info fontSize="inherit"/> }
+              checked={ openTab === "info" }
+              onChange={ (_, checked) => setOpenTab("info", checked) }
+              sx={{color: "white"}}
+            />
+            <Checkbox
+              icon={ <Work color="inherit" fontSize="inherit"/> }
+              checkedIcon={ <Work fontSize="inherit"/> }
+              checked={ openTab === "job" }
+              onChange={ (_, checked) => setOpenTab("job", checked) }
+              sx={{color: "white"}}
+            />
+        </Box>
       </Box>
         
       }

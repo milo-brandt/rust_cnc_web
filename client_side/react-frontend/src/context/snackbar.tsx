@@ -34,7 +34,7 @@ export function SnackBarProvider({ children }: PropsWithChildren<{}>) {
   let isActive = true;
   useEffect(() => () => { isActive = false; }, []);
 
-  const handleClose = (event?: any, reason?: string) => {
+  const handleClose = (_?: any, reason?: string) => {
     if (reason === 'clickaway') {
       return;
     }

@@ -7,3 +7,13 @@ export function mapMaybe<T, U> (map: (value: T) => U, value: Maybe<T>): Maybe<U>
     return map(value)
   }
 }
+
+interface MarkedOptionalSome<T> {
+  status: "some",
+  value: T,
+}
+interface MarkedOptionalNone {
+  status: "none"
+}
+
+export type MarkedOptional<T> = MarkedOptionalNone | MarkedOptionalSome<T>;

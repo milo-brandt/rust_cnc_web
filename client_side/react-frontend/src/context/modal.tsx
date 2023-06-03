@@ -1,6 +1,6 @@
 import { PropsWithChildren, createContext, useContext, useEffect, useState } from "react";
 import { Maybe } from "../util/types";
-import { Button, Dialog, DialogActions, DialogContent, DialogContentText, DialogTitle } from "@mui/material";
+import { Button, Dialog, DialogActions, DialogContent, DialogTitle } from "@mui/material";
 
 export interface Dialog {
   title: string,
@@ -30,7 +30,7 @@ export function DialogProvider({ children }: PropsWithChildren<{}>) {
   let isActive = true;
   useEffect(() => () => { isActive = false; }, []);
 
-  const handleClose = (event?: any, reason?: string) => {
+  const handleClose = (_?: any, reason?: string) => {
     if (reason === 'backdropClick') {
       return;
     }

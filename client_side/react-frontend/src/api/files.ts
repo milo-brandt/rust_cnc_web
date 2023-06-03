@@ -1,5 +1,5 @@
 import { cncAxios } from "./cncAxios";
-import { PromiseResult, ReloadablePromiseResult, useGet } from "./generic";
+import { ReloadablePromiseResult, useGet } from "./generic";
 
 export interface DirectoryItem {
   name: string,

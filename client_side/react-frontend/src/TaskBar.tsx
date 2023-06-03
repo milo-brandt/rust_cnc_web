@@ -30,9 +30,6 @@ export default function TaskBar () {
                 size="large"
                 edge="start"
                 color="inherit"
-                sx={{
-                  visibility: showTimeControls ? 'visible' : 'hidden',
-                }}
                 component={ Link }
                 to="/"
               >

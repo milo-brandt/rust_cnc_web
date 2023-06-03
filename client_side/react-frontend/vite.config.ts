@@ -8,5 +8,8 @@ export default defineConfig({
     alias: [
       { find: '@', replacement: "/src" },
     ]
+  },
+  define: {
+    __INJECTED_HOST_NAME__: JSON.stringify(process.env.API_HOST ?? "localhost:3000")
   }
 })

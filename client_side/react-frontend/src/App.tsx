@@ -2,13 +2,10 @@ import { useMachineStatus, useStatus } from './api/globalListener'
 import { Box, CircularProgress } from '@mui/material'
 import { StatusProvider } from './context/status'
 import { createBrowserRouter, RouterProvider } from 'react-router-dom'
-import HomePage from './HomePage'
-import { Layout } from './Layout'
-import { FileListPage } from './FileList'
+import Layout from './Layout'
 import { SnackBarProvider } from './context/snackbar'
 import { DialogProvider } from './context/modal'
-import DebugPage from './DebugPage'
-import { ViewPage } from './ViewPage'
+import { Suspense, createElement, lazy } from 'react'
 
 const router = createBrowserRouter([
   {
@@ -17,19 +14,19 @@ const router = createBrowserRouter([
     children: [
       {
         path: '/',
-        element: <HomePage/>,
+        element: createElement(lazy(() => import("./HomePage")))
       },
       {
         path: '/gcode/*',
-        element: <FileListPage/>
+        element: createElement(lazy(() => import("./FileList")))
       },
       {
         path: '/view/*',
-        element: <ViewPage/>
+        element: createElement(lazy(() => import("./ViewPage")))
       },
       {
         path: '/debug',
-        element: <DebugPage/>
+        element: createElement(lazy(() => import("./DebugPage")))
       }
     ]
   },
@@ -49,18 +46,20 @@ export default function Home () {
   } else {
     return (
       <main>
-        <Box margin="1rem">
-          <StatusProvider value={{
-            jobStatus: status,
-            machineStatus
-          }}>
-            <SnackBarProvider>
-              <DialogProvider>
-                <RouterProvider router={router}/>
-              </DialogProvider>
-            </SnackBarProvider>
-          </StatusProvider>
-        </Box>
+        <Suspense>
+          <Box margin="1rem">
+            <StatusProvider value={{
+              jobStatus: status,
+              machineStatus
+            }}>
+              <SnackBarProvider>
+                <DialogProvider>
+                  <RouterProvider router={router}/>
+                </DialogProvider>
+              </SnackBarProvider>
+            </StatusProvider>
+          </Box>
+        </Suspense>
       </main>
     )
   }

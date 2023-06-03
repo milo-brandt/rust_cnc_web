@@ -9,6 +9,7 @@ import { useSnackbar } from "./context/snackbar";
 import { useDialog } from "./context/modal";
 import { SyntheticEvent, useState } from "react";
 import { Maybe } from "./util/types";
+import { HOST } from "./api/constants";
 
 
 function getParentDirectory(directory: string): Maybe<string> {
@@ -37,7 +38,7 @@ function FileUpload({setValue}: {setValue: (value: string) => void}) {
   </DialogContentText>
 }
 
-export function FileListPage() {
+export default function FileListPage() {
   const { "*": directory } = useParams() as {"*": string};
   const pathPrefix = directory ? directory + "/" : "";
   const { result: directoryListingResult, reload: reloadDirectories } = useDirectoryListing(directory);
@@ -135,7 +136,7 @@ export function FileListPage() {
               <IconButton component={Link} to={`/view/${itemPath}/`}><Search /></IconButton>
             </Tooltip>
             <Tooltip title="Download">
-              <IconButton component={Link} to={`http://localhost:3000/job/download_file/${itemPath}`}><Download /></IconButton>
+              <IconButton component={Link} to={`http://${HOST}/job/download_file/${itemPath}`}><Download /></IconButton>
             </Tooltip>
             <Tooltip title="Delete">
               <IconButton onClick={ () => requestFileDeletion(itemPath) }>

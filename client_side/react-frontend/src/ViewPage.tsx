@@ -1,14 +1,16 @@
 import { useCallback, useMemo, useReducer, useRef, useState } from "react";
 import { PageErrored, PageLoading } from "./ErrorState";
 import { useGet } from "./api/generic";
-import { useParams } from "react-router-dom";
-import { Maybe } from "./util/types";
+import { Link, useParams } from "react-router-dom";
 import { flatten, mapValues, max, min, range, round, sum } from "lodash";
 import { Box, Checkbox, Grow, IconButton, Paper, Slider, Typography } from "@mui/material";
 import { Matrix } from "ts-matrix";
 import Quaternion from "quaternion";
-import { Info, PlayArrow, Work } from "@mui/icons-material";
+import { ArrowBack, Download, Info, PlayArrow, RestartAlt, Work } from "@mui/icons-material";
 import { Canvas, contextCached } from "./Canvas";
+import { executeFile } from "./api/files";
+import { useSnackbar } from "./context/snackbar";
+import { HOST } from "./api/constants";
 
 const VERTEX_SHADER_CODE = "#version 300 es\n\
 uniform mat4x4 transformation;\n\
@@ -86,9 +88,20 @@ function setupContext(context: WebGL2RenderingContext) {
     }
   }
   return {
-    program,
-    attributeLocations,
-    buffer: context.createBuffer()!,
+    activate: () => { context.useProgram(program); },
+    setUniforms: ({transformation, depthCutoff, distanceCutoff}: {transformation: Matrix, depthCutoff: number, distanceCutoff: number}) => {
+      // With the program active, set the uniforms of it.
+      context.uniformMatrix4fv(attributeLocations.uniform.transformation, true, flattenMatrix(transformation));
+      context.uniform1f(attributeLocations.uniform.depthCutoff, depthCutoff);
+      context.uniform1f(attributeLocations.uniform.distanceCutoff, distanceCutoff);
+    },
+    setAttributeLocations: ({stride, positionOffset, travelOffset}: {stride: number, positionOffset: number, travelOffset: number}) => {
+      // With the program active and a VAO bound, set the attribute locations.
+      context.vertexAttribPointer(attributeLocations.input.position, 3, context.FLOAT, false, stride, positionOffset);
+      context.vertexAttribPointer(attributeLocations.input.distance, 1, context.FLOAT, false, stride, travelOffset);
+      context.enableVertexAttribArray(attributeLocations.input.position);
+      context.enableVertexAttribArray(attributeLocations.input.distance);  
+    }
   }
 }
 function boundsOf(points: Array<[number, number, number]>): { min: [number, number, number], max: [number, number, number] } {
@@ -108,11 +121,19 @@ function flattenMatrix(matrix: Matrix): number[] {
   return flatten(matrix.values);
 }
 
-export function ViewPage() {
+export default function ViewPage() {
   let { "*": directory } = useParams() as {"*": string};
   if(directory && directory[directory.length - 1] == "/") {
     directory = directory.slice(0, directory.length - 1);
   }
+  const parent = (() => {
+    const lastSlash = directory.lastIndexOf("/");
+    if(lastSlash === -1) {
+      return ""
+    } else {
+      return directory.slice(0, lastSlash);
+    }
+  })();
   const { result: lineResult } = useGet<Array<[number, number, number]>>(`/job/examine/${directory}`);
   /*
     
@@ -159,11 +180,10 @@ export function ViewPage() {
     return change.mul(state).normalize();
   }, new Quaternion());
   const dragging = useRef(false);
+  const { snackAsyncCatch } = useSnackbar();
 
   const zPositionRef = useRef<number | null>(null);
   zPositionRef.current = zPosition;
-  const travelRef = useRef<number | null>(null);
-  travelRef.current = travelPosition;
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [openTab, setOpenTabRaw] = useState<"info" | "job" | null>(null);
   function setOpenTab(name: "info" | "job", isOpen: boolean) {
@@ -175,13 +195,8 @@ export function ViewPage() {
   }
   //
   const getCanvasInfo = useCallback(contextCached(setupContext), []);
-  const activateProgram = useCallback((context: WebGL2RenderingContext) => {
-    const canvasInfo = getCanvasInfo(context);
-    context.useProgram(canvasInfo.program);
-    return canvasInfo;  
-  }, []);
   const preparePoints = useCallback(contextCached(context => {
-    const canvasInfo = getCanvasInfo(context);
+    const programInfo = getCanvasInfo(context);
     const buffer = context.createBuffer();
     context.bindBuffer(context.ARRAY_BUFFER, buffer);
     const bufferData = new Float32Array(
@@ -190,10 +205,12 @@ export function ViewPage() {
     context.bufferData(context.ARRAY_BUFFER, bufferData, context.STATIC_DRAW);
     const vao = context.createVertexArray()!;
     context.bindVertexArray(vao);
-    context.vertexAttribPointer(canvasInfo.attributeLocations.input.position, 3, context.FLOAT, false, 4 * 4, 0);
-    context.vertexAttribPointer(canvasInfo.attributeLocations.input.distance, 1, context.FLOAT, false, 4 * 4, 3 * 4);
-    context.enableVertexAttribArray(canvasInfo.attributeLocations.input.position);
-    context.enableVertexAttribArray(canvasInfo.attributeLocations.input.distance);
+    programInfo.activate();
+    programInfo.setAttributeLocations({
+      stride: 4 * 4,
+      positionOffset: 0,
+      travelOffset: 3 * 4,
+    });
     return {
       draw: () => {
         context.bindVertexArray(vao);
@@ -234,16 +251,19 @@ export function ViewPage() {
       return () => {};
     }
     function render(context: WebGL2RenderingContext, canvas: HTMLCanvasElement) {
-      if(!pointMetadata) {
-        return;
-      }
-      const canvasInfo = activateProgram(context);
+      const programInfo = getCanvasInfo(context);
+      programInfo.activate();
       const width = canvas.clientWidth;
       const height = canvas.clientHeight;
       const aspect = width / height;
       canvas.width = width;
       canvas.height = height;
       context.viewport(0, 0, width, height);
+      context.clearColor(0.0, 0.0, 0.0, 1.0);
+      context.clear(context.COLOR_BUFFER_BIT);
+      if(!pointMetadata) {
+        return;
+      }
       //context.useProgram(canvasInfo.program);
       const center = pointMetadata.center;
       const maxRange = pointMetadata.maxRange;
@@ -280,16 +300,15 @@ export function ViewPage() {
         .multiply(shrinkToUnitSphere)
         .multiply(translateAroundZero)
       )
-
-      context.uniformMatrix4fv(canvasInfo.attributeLocations.uniform.transformation, true, flattenMatrix(combined));
-      context.uniform1f(canvasInfo.attributeLocations.uniform.depthCutoff, (zPosition ?? pointMetadata.bounds.max[2]) + 0.001);
-      context.uniform1f(canvasInfo.attributeLocations.uniform.distanceCutoff, travelRef.current ?? pointMetadata.totalTravel);
-      context.clearColor(0.0, 0.0, 0.0, 1.0);
-      context.clear(context.COLOR_BUFFER_BIT);
+      programInfo.setUniforms({
+        transformation: combined,
+        depthCutoff: (zPosition ?? pointMetadata.bounds.max[2]) + 0.001,
+        distanceCutoff: travelPosition ?? pointMetadata.totalTravel,
+      })
       preparePoints(context).draw();
     }
     return render;
-  }, [lineResult, activateProgram, zoom, rotation, pointMetadata, zPosition, preparePoints]);
+  }, [lineResult, zoom, rotation, pointMetadata, zPosition, preparePoints, travelPosition]);
   
   if(lineResult.status == "loading") {
     return <PageLoading/>
@@ -298,57 +317,66 @@ export function ViewPage() {
   } else {
     return <div ref={containerRef} style={{position: "relative", width: "100%", height: "90vh"}}>
       <Canvas render={render} setupCanvas={setupCanvas}/>
-      { dragBounds !== null && travelLength !== null && <Box position="absolute" bottom="2rem" top="2rem" left="1rem" display="flex" flexDirection="row" color="white">
-      <Box display="flex" flexDirection="column" alignItems="center" zIndex={10}>
-          <Slider
-            orientation="vertical"
-            valueLabelDisplay="auto"
-            step={0.001}
-            min={dragBounds[0] - 0.002}
-            max={dragBounds[1]}
-            value={zPosition ?? dragBounds[1]}
-            onChange={ (_, value) => setZPosition(value as number) }
-            valueLabelFormat={ value => `Z < ${ round(value, 2) }`}
-            sx={{
-              '& .MuiSlider-valueLabel': {
-                opacity: 1.0,
-                right: "auto",
-                left: "30px",
-              },
-              '& .MuiSlider-valueLabel::before': {
-                right: "auto",
-                left: "0px",
-              },
-            }}
-          />
-          <Box marginTop="1rem" fontWeight="bolder">
-            Z
-          </Box>
+      { dragBounds !== null && travelLength !== null && <Box position="absolute" bottom="2rem" top="0rem" left="0rem" display="flex" flexDirection="column" color="white">
+        <Box>
+          <IconButton color="inherit" size="large" component={ Link } to={ `/gcode/${parent}` }>
+            <ArrowBack color="inherit" sx={{
+              fontSize: "2rem"
+            }}/>
+          </IconButton>
         </Box>
-        <Box display="flex" flexDirection="column" alignItems="center" zIndex={9}>
-          <Slider
-            orientation="vertical"
-            valueLabelDisplay="auto"
-            step={0.001}
-            min={0}
-            max={travelLength}
-            value={travelPosition ?? travelLength}
-            onChange={ (_, value) => setTravelPosition(value as number) }
-            valueLabelFormat={ value => `T < ${ round(value) }`}
-            sx={{
-              '& .MuiSlider-valueLabel': {
-                opacity: 1.0,
-                right: "auto",
-                left: "30px",
-              },
-              '& .MuiSlider-valueLabel::before': {
-                right: "auto",
-                left: "0px",
-              },
-            }}
-          />
-          <Box marginTop="1rem" fontWeight="bolder">
-            T
+        <Box display="flex" flexDirection="row" flexGrow={1} mt="1rem" ml="1rem">
+        <Box display="flex" flexDirection="column" alignItems="center" zIndex={10}>
+            <Slider
+              orientation="vertical"
+              valueLabelDisplay="auto"
+              step={0.001}
+              min={dragBounds[0] - 0.002}
+              max={dragBounds[1]}
+              value={zPosition ?? dragBounds[1]}
+              onChange={ (_, value) => setZPosition(value as number) }
+              valueLabelFormat={ value => `Z < ${ round(value, 2) }`}
+              sx={{
+                '& .MuiSlider-valueLabel': {
+                  opacity: 1.0,
+                  right: "auto",
+                  left: "30px",
+                },
+                '& .MuiSlider-valueLabel::before': {
+                  right: "auto",
+                  left: "0px",
+                },
+              }}
+            />
+            <Box marginTop="1rem" fontWeight="bolder">
+              Z
+            </Box>
+          </Box>
+          <Box display="flex" flexDirection="column" alignItems="center" zIndex={9}>
+            <Slider
+              orientation="vertical"
+              valueLabelDisplay="auto"
+              step={0.001}
+              min={0}
+              max={travelLength}
+              value={travelPosition ?? travelLength}
+              onChange={ (_, value) => setTravelPosition(value as number) }
+              valueLabelFormat={ value => `T < ${ round(value) }`}
+              sx={{
+                '& .MuiSlider-valueLabel': {
+                  opacity: 1.0,
+                  right: "auto",
+                  left: "30px",
+                },
+                '& .MuiSlider-valueLabel::before': {
+                  right: "auto",
+                  left: "0px",
+                },
+              }}
+            />
+            <Box marginTop="1rem" fontWeight="bolder">
+              T
+            </Box>
           </Box>
         </Box>
       </Box> }
@@ -372,12 +400,15 @@ export function ViewPage() {
             <Paper sx={{p: 1, position: "absolute", bottom: "0rem", right: "0rem", whiteSpace: "nowrap"}}>
               <Typography variant="h6">Job Execution</Typography>
               <Box display="flex" alignItems="center" width="100%" justifyContent="flex-end">
-              <em>Run:</em> <IconButton><PlayArrow/> </IconButton>
+                <em>Run:</em> <IconButton onClick={ () => snackAsyncCatch(executeFile(directory), () => "Failed to execute!") }><PlayArrow/> </IconButton>
+              </Box>
+              <Box display="flex" alignItems="center" width="100%" justifyContent="flex-end">
+                <em>Download:</em> <IconButton component={Link} to={`http://${HOST}/job/download_file/${directory}`}><Download/> </IconButton>
               </Box>
             </Paper>
           </Grow>
         </Box>
-        <Box fontSize="2em">
+        <Box fontSize="2rem">
           <Checkbox
               icon={ <Info color="inherit" fontSize="inherit"/> }
               checkedIcon={ <Info fontSize="inherit"/> }
@@ -394,8 +425,17 @@ export function ViewPage() {
             />
         </Box>
       </Box>
-        
       }
+      <Box position="absolute" top="0rem" right="1rem" color="white">
+        <IconButton color="inherit" onClick={() => {
+          multiplyRotation(rotation.inverse());
+          multiplyZoom(1 / zoom);
+        }}>
+          <RestartAlt color="inherit" sx={{
+            fontSize:"2.5rem"
+          }}/>
+        </IconButton>
+      </Box>
     </div>
   }
 }

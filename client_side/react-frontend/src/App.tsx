@@ -17,6 +17,10 @@ const router = createBrowserRouter([
         element: createElement(lazy(() => import("./HomePage")))
       },
       {
+        path: '/control',
+        element: createElement(lazy(() => import("./ControlPage")))
+      },
+      {
         path: '/gcode/*',
         element: createElement(lazy(() => import("./FileList")))
       },
@@ -47,7 +51,7 @@ export default function Home () {
     return (
       <main>
         <Suspense>
-          <Box margin="1rem">
+          <Box margin="1rem" height="calc(100vh - 2rem)" width="calc(100vw - 2rem)">
             <StatusProvider value={{
               jobStatus: status,
               machineStatus

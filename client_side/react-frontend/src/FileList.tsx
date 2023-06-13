@@ -2,7 +2,7 @@ import { DirectoryItem, createDirectory, deleteFile, executeFile, uploadFile, us
 import { Link, useParams } from "react-router-dom";
 import { PageLoading, PageErrored } from "./ErrorState";
 import { flatten, groupBy } from "lodash";
-import { Box, Button, DialogContentText, IconButton, Paper, TableCell, TableContainer, TableRow, TextField, Tooltip, Typography } from "@mui/material";
+import { Box, Button, DialogActions, DialogContentText, DialogTitle, IconButton, Paper, Table, TableBody, TableCell, TableContainer, TableRow, TextField, Tooltip, Typography } from "@mui/material";
 import { ArrowUpward, CreateNewFolder, Delete, Download, Folder, PlayArrow, Search, UploadFile } from "@mui/icons-material";
 import { useStatusContext } from "./context/status";
 import { useSnackbar } from "./context/snackbar";
@@ -10,6 +10,7 @@ import { useDialog } from "./context/modal";
 import { SyntheticEvent, useState } from "react";
 import { Maybe } from "./util/types";
 import { HOST } from "./api/constants";
+import { stringDialog } from "./dialog/string";
 
 
 function getParentDirectory(directory: string): Maybe<string> {
@@ -30,14 +31,6 @@ function getParentDirectory(directory: string): Maybe<string> {
   }
 }
 
-function FileUpload({setValue}: {setValue: (value: string) => void}) {
-  const [name, setName] = useState("");
-  setValue(name);
-  return <DialogContentText>
-    <TextField variant="standard" placeholder="Directory Name" value={name} onChange={ e => setName(e.target.value) }/>
-  </DialogContentText>
-}
-
 export default function FileListPage() {
   const { "*": directory } = useParams() as {"*": string};
   const pathPrefix = directory ? directory + "/" : "";
@@ -46,7 +39,30 @@ export default function FileListPage() {
   const canRunJob = jobStatus === null;
   const { createSnack, snackAsyncCatch } = useSnackbar();
   const requestFileDeletion = (path: string) => snackAsyncCatch(deleteFile(path), () => `Failed to delete ${path}`).then(() => reloadDirectories());
-  const { createDialog } = useDialog(); 
+  const { createDialogPromise } = useDialog(); 
+  function directoryCreationDialog() {
+    return stringDialog(createDialogPromise, {
+      title: "Create folder",
+      placeholder: "Directory Name",
+      action: "Create"
+    });
+  }
+  function confirmDeletionDialog(itemPath: string) {
+    return createDialogPromise<boolean>(resolve => {
+      return <>
+        <DialogTitle>
+          Confirm folder deletion
+        </DialogTitle>
+        <DialogContentText sx={{ml: "1rem", mr: "1rem"}}>
+          Delete the folder /{itemPath} and all of its contents
+        </DialogContentText>
+        <DialogActions>
+          <Button onClick={() => resolve(false)}>Cancel</Button>
+          <Button onClick={() => resolve(true)}>Delete</Button>
+        </DialogActions>
+      </>
+    })
+  }
 
   async function uploadFiles(event: SyntheticEvent) {
     const input = event.target as HTMLInputElement;
@@ -71,13 +87,8 @@ export default function FileListPage() {
     reloadDirectories();
   }
   async function directoryCreation() {
-    let value: Maybe<string> = null;
-    let choice = await createDialog({
-      title: "Create Folder",
-      message: <FileUpload setValue={ x => { value = x; } }/>,
-      actions: ["Cancel", "Create"]
-    });
-    if(choice == "Create" && value) {
+    const value = await directoryCreationDialog();
+    if(value) {
       await snackAsyncCatch(createDirectory(pathPrefix + value), () => `Failed to create directory ${value}`).finally(reloadDirectories);
     }
   }
@@ -104,12 +115,7 @@ export default function FileListPage() {
           <TableCell>
             <Tooltip title="Delete">
               <IconButton onClick={ async () => {
-                let choice = await createDialog({
-                  title: "Confirm folder deletion?",
-                  message: <DialogContentText>{`Delete the folder /${ itemPath } and all of its contents.`}</DialogContentText>,
-                  actions: ["Cancel", "Delete"]
-                });
-                if(choice == "Delete") {
+                if(await confirmDeletionDialog(itemPath)) {
                   await requestFileDeletion(itemPath);
                 }
                }}>
@@ -174,21 +180,23 @@ export default function FileListPage() {
           { directory + "/" }
         </Typography>
         <Paper>
-          <TableContainer component="table">
-            <tbody>
-              {
-                [...directoryItems, ...fileItems, ...placeholderItem]
-              }
-              <TableRow>
-                <TableCell>
-                <Button variant="contained" startIcon={ <CreateNewFolder/> } sx={{mr: 1}} onClick={() => directoryCreation()}>Create Folder</Button>
-                <Button variant="contained" startIcon={ <UploadFile/> } component="label">Upload<input type="file" hidden multiple onChange={ uploadFiles }/></Button>
-                </TableCell>
-                <TableCell>
+          <TableContainer>
+            <Table>
+              <TableBody>
+                {
+                  [...directoryItems, ...fileItems, ...placeholderItem]
+                }
+                <TableRow>
+                  <TableCell>
+                  <Button variant="contained" startIcon={ <CreateNewFolder/> } sx={{mr: 1}} onClick={() => directoryCreation()}>Create Folder</Button>
+                  <Button variant="contained" startIcon={ <UploadFile/> } component="label">Upload<input type="file" hidden multiple onChange={ uploadFiles }/></Button>
+                  </TableCell>
+                  <TableCell>
 
-                </TableCell>
-              </TableRow>
-            </tbody>
+                  </TableCell>
+                </TableRow>
+              </TableBody>
+            </Table>
           </TableContainer>
         </Paper>
       </div>

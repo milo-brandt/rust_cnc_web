@@ -3,8 +3,8 @@ import type { JobStatus, MachineStatus } from '../api/globalListener'
 import type { Maybe } from '../util/types'
 
 export interface TotalStatus {
-  jobStatus: Maybe<JobStatus>
-  machineStatus: Maybe<MachineStatus>
+  jobStatus: Maybe<JobStatus>;
+  machineStatus: MachineStatus;
 }
 
 const StatusContext = createContext<TotalStatus | null>(null)

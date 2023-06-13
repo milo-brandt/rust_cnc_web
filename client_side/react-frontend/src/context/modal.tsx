@@ -8,49 +8,73 @@ export interface Dialog {
   actions: string[],
 }
 
-type DialogCallback = (snack: Dialog) => Promise<string>;
+type DialogCallback = (snack: (close: () => void) => JSX.Element) => void;
 
 const DialogContext = createContext<DialogCallback | null>(null)
 
+export type DialogPromiseFactory = <T,>(dialog: (resolve: (value: T) => void) => JSX.Element) => Promise<T>;
+
 export function useDialog() {
-  const createDialog = useContext(DialogContext)!;
+  const createDialogRaw = useContext(DialogContext)!;
   return {
-    createDialog,
+    createDialogRaw,
+    createDialogPromise: <T,>(dialog: (resolve: (value: T) => void) => JSX.Element): Promise<T> => new Promise(
+      resolve => {
+        let isResolvable = true;
+        console.log("CREATING RAW DIALOG!!!")
+        createDialogRaw(close => dialog((value) => {
+          if(isResolvable) {
+            close();
+            resolve(value);
+          }
+        }))
+      }
+    )
   }
 }
 
-export interface DialogWithPromise extends Dialog {
-  resolve?: (value: string) => void;
-}
 
 export function DialogProvider({ children }: PropsWithChildren<{}>) {
-  const [dialog, setDialog] = useState<Maybe<DialogWithPromise>>(null);
+  const [dialog, setDialog] = useState<Maybe<JSX.Element>>(null);
   const [open, setOpen] = useState(false);
   // Track whether the component is mounted...
   let isActive = true;
   useEffect(() => () => { isActive = false; }, []);
 
-  const handleClose = (_?: any, reason?: string) => {
+  /*const handleClose = (_?: any, reason?: string) => {
     if (reason === 'backdropClick') {
       return;
     }
     setOpen(false);
-  };
+  };*/
 
   return (
-    <DialogContext.Provider value={dialog => {
+    <DialogContext.Provider value={dialogFactory => {
       if (isActive) {
         setOpen(true);
-        return new Promise(resolve => setDialog({
-          ...dialog,
-          resolve
-        }));
-      } else {
-        return Promise.reject("dialog context expired");
+        let localActive = true;
+        const close = () => {
+          if(isActive && localActive) {
+            localActive = false;
+            setOpen(false);
+          }
+        };
+        // Wrap the dialog in a component so it can have state.
+        function Dialog() {
+          return dialogFactory(close);
+        }
+        setDialog(<Dialog/>)
       }
     }}>
       { children }
-      <Dialog open={open && dialog !== null} onClose={handleClose}>
+      <Dialog open={open && dialog !== null}>
+        { dialog }
+      </Dialog>
+    </DialogContext.Provider>
+  )
+}
+
+/*
         <DialogTitle>
           { dialog?.title }
         </DialogTitle>
@@ -70,7 +94,5 @@ export function DialogProvider({ children }: PropsWithChildren<{}>) {
             })
           }
         </DialogActions>
-      </Dialog>
-    </DialogContext.Provider>
-  )
-}
+
+*/

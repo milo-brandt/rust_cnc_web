@@ -51,12 +51,12 @@ export function Canvas({ setupCanvas, render }: { setupCanvas?: (canvas: HTMLCan
       render();
       animationFrame = requestAnimationFrame(frameCallback);
     }
-    animationFrame = requestAnimationFrame(frameCallback);
+    frameCallback();
     return () => {
       cancelAnimationFrame(animationFrame)
     }
   }, []);
   return (
-    <canvas ref={trueCanvasRef} style={{width: "100%", height: "100%"}}/>
+    <canvas ref={trueCanvasRef} style={{width: "100%", height: "100%", position: "absolute" }}/>
   )
 }

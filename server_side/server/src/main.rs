@@ -241,6 +241,8 @@ async fn run_server(machine: ImmediateHandle, debug_rx: history_broadcast::Recei
         .route(api::RAPID_OVERRIDE.half, (immediate_command(|handle| async move { handle.override_speed(SpeedOverride::RapidHalf).await; })))
         .route(api::RAPID_OVERRIDE.quarter, (immediate_command(|handle| async move { handle.override_speed(SpeedOverride::RapidQuarter).await; })))
 
+        .route("/command/home", (immediate_command(|handle| async move { handle.override_speed(SpeedOverride::RapidQuarter).await; })))
+
         .route(api::SHUTDOWN, post(shutdown))
 
         .nest("/coords", coordinates::get_service(&config).await.unwrap())
@@ -337,7 +339,7 @@ async fn run_gcode_unchecked(
     // Runs the line *if* no job is scheduled yet.
     machine: Extension<Arc<ImmediateHandle>>,
     message: RawBody,
-) -> String {
+) -> ServerResult<String> {
     let mut body_bytes = hyper::body::to_bytes(message.0).await.unwrap().to_vec();
     body_bytes.push(b'\n');
     let result = machine.try_send_job(move |handle: JobHandle| async move {
@@ -346,8 +348,8 @@ async fn run_gcode_unchecked(
         }
     }).await;
     match result {
-        Ok(()) => "Job sent!".to_string(),
-        Err(_) => "Job not sent!".to_string(),
+        Ok(()) => Ok("Job sent!".to_string()),
+        Err(_) => Err(anyhow!("Job not sent!").into()),
     }
 }
 

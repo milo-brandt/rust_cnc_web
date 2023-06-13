@@ -1,7 +1,16 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useState } from "react";
 
-export function useIsActive() {
-  const result = useRef(true);
-  useEffect(() => () => { result.current = false; }, []);
-  return useCallback(() => result.current, []);
+export function useLocalStorage<T>(key: string, initialValue: () => T): [T, (value: T) => void] {
+  const [currentValue, setValueRaw] = useState(() => {
+    const result = localStorage.getItem(key);
+    if(result === null) {
+      return initialValue();
+    } else {
+      return JSON.parse(result);
+    }
+  });
+  return [currentValue, (value: T) => {
+    setValueRaw(value);
+    localStorage.setItem(key, JSON.stringify(value));
+  }]
 }

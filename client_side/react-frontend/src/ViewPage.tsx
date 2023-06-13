@@ -315,7 +315,7 @@ export default function ViewPage() {
   } else if(lineResult.status == "rejected") {
     return <PageErrored/>
   } else {
-    return <div ref={containerRef} style={{position: "relative", width: "100%", height: "90vh"}}>
+    return <div ref={containerRef} style={{position: "relative", width: "100%", height: "100%"}}>
       <Canvas render={render} setupCanvas={setupCanvas}/>
       { dragBounds !== null && travelLength !== null && <Box position="absolute" bottom="2rem" top="0rem" left="0rem" display="flex" flexDirection="column" color="white">
         <Box>

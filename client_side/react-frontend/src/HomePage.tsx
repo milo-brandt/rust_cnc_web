@@ -37,6 +37,7 @@ export default function HomePage() {
       <Typography variant="h4">Home</Typography>
       <List>
         <ListItemLink to="/gcode" primary="Files"/>
+        <ListItemLink to="/control" primary="Control"/>
         <ListItemLink to="/debug" primary="Debug"/>
       </List>
     </>

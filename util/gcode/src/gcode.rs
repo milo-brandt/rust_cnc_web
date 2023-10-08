@@ -31,6 +31,7 @@ pub struct ModalUpdates {
 }
 
 
+#[derive(Debug, Clone, PartialEq)]
 pub struct LinearMove(pub PartialPosition);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Orientation { Clockwise, Counterclockiwse }
@@ -43,34 +44,38 @@ impl Neg for Orientation {
         }
     }
 }
+#[derive(Debug, Clone, PartialEq)]
 pub struct HelicalMove {
     pub orientation: Orientation,
     pub target: PartialPosition,
     pub center: PartialOffset,
 }
+#[derive(Debug, Clone, PartialEq)]
 pub struct ProbeMove(pub ProbeMode, pub PartialPosition);
 
+#[derive(Debug, Clone, PartialEq)]
 pub enum CommandContent {
     LinearMove(LinearMove),
     HelicalMove(HelicalMove),
     ProbeMove(ProbeMove),
 }
+#[derive(Debug, Clone, PartialEq)]
 pub struct Line {
     pub modal_updates: ModalUpdates,
     pub command: Option<CommandContent>,
 }
 
-pub struct CommandTransformer {
+pub struct CommandTransformer<'a> {
     orientation_sign: Option<Sign>,
     planes: Vec<ArcPlane>,
-    transformation: SimpleTransform,
+    transformation: &'a SimpleTransform,
 }
 pub enum CommandTransformError {
     UnknownOrientationSign,
     InvalidArcPlane(u8, u8),
 }
-impl CommandTransformer {
-    pub fn new(transformation: SimpleTransform, planes: Vec<ArcPlane>) -> Self {
+impl<'a> CommandTransformer<'a> {
+    pub fn new(transformation: &'a SimpleTransform, planes: Vec<ArcPlane>) -> Self {
         CommandTransformer {
             // If this is a translation, we don't need to re-orient anything, even if we don't know the arc plane.
             orientation_sign: if transformation.is_translation() { Some(Sign::Positive) } else { None },

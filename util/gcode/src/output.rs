@@ -2,7 +2,7 @@ use std::{fmt::{Display, Formatter, self}, cell::Cell};
 
 use crate::{config::MachineConfiguration, gcode::{Line, CommandContent, MotionMode, LinearMove, ProbeMove, HelicalMove, Orientation, ArcPlane, ModalUpdates, CoordinateMode, Units}, coordinates::{PartialPosition, PartialOffset}, probe::{ProbeMode, ProbeDirection, ProbeExpectation}};
 
-struct MachineFormatter<'a, T>(&'a MachineConfiguration, T);
+pub struct MachineFormatter<'a, T>(pub &'a MachineConfiguration, pub T);
 
 impl<'a, 'b> Display for MachineFormatter<'a, &'b PartialPosition> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -126,7 +126,7 @@ mod test {
             command: Some(CommandContent::HelicalMove(HelicalMove {
                 orientation: Orientation::Counterclockiwse,
                 target: PartialPosition(vec![Some(1.0), Some(2.0), Some(3.0), Some(4.0)]),
-                center: PartialOffset(vec![Some(5.0), Some(6.0), None])
+                center: PartialOffset(vec![Some(5.0), Some(6.0), None, None])
             })),
         }).to_string();
         assert_eq!(
@@ -145,7 +145,7 @@ mod test {
                 units: None,
                 arc_plane: None
             },
-            command: Some(CommandContent::LinearMove(LinearMove(PartialPosition(vec![Some(1.0), Some(2.0), Some(3.0)])))),
+            command: Some(CommandContent::LinearMove(LinearMove(PartialPosition(vec![Some(1.0), Some(2.0), Some(3.0), None])))),
         }).to_string();
         assert_eq!(
             result,

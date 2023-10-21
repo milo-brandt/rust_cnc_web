@@ -28,3 +28,7 @@ export async function uploadFile(path: string, file: Blob): Promise<void> {
 export async function createDirectory(path: string): Promise<void> {
   await cncAxios.post("/job/create_directory", { directory: path });
 }
+
+export function useResultListing(): ReloadablePromiseResult<string[]> {
+  return useGet("/results");
+}

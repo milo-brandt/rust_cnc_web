@@ -1,6 +1,6 @@
 import { PropsWithChildren, createContext, useContext, useEffect, useState } from "react";
 import { Maybe } from "../util/types";
-import { Button, Dialog, DialogActions, DialogContent, DialogTitle } from "@mui/material";
+import { Dialog } from "@mui/material";
 
 export interface Dialog {
   title: string,

@@ -1,39 +1,6 @@
 use std::{ops::{Neg, Mul}, convert::Infallible};
 
-use crate::coordinates::{Position, PartialPosition, PartialOffset, Offset};
-
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
-pub enum Sign { Positive, Negative }
-impl Sign {
-    pub fn apply<T: Neg<Output = T>>(self, value: T) -> T {
-        match self {
-            Sign::Positive => value,
-            Sign::Negative => -value,
-        }
-    }
-}
-impl Mul<Sign> for Sign {
-    type Output = Sign;
-
-    fn mul(self, rhs: Sign) -> Self::Output {
-        match (self, rhs) {
-            (Sign::Positive, Sign::Positive) => Sign::Positive,
-            (Sign::Positive, Sign::Negative) => Sign::Negative,
-            (Sign::Negative, Sign::Positive) => Sign::Negative,
-            (Sign::Negative, Sign::Negative) => Sign::Positive,
-        }
-    }
-}
-impl Neg for Sign {
-    type Output = Sign;
-
-    fn neg(self) -> Self::Output {
-        match self {
-            Sign::Positive => Sign::Negative,
-            Sign::Negative => Sign::Positive,
-        }
-    }
-}
+use crate::coordinates::{Position, PartialPosition, PartialOffset, Offset, Sign};
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub struct SignedIndex(pub Sign, pub u8);
@@ -41,6 +8,7 @@ pub struct SignedIndex(pub Sign, pub u8);
 /// 
 /// In SimpleTransform(permutation), if permutation[0] = (sign, i) then (1, 0, 0, ...) maps to (..., 0, sign, 0, ...)
 /// where sign occurs at the ith index.
+#[derive(Clone, PartialEq, Debug)]
 pub struct SimpleTransform {
     pub permutation: Vec<SignedIndex>,
     pub offset: Offset
@@ -98,7 +66,7 @@ impl Transform<PartialOffset> for SimpleTransform {
         let mut results = PartialOffset(Vec::new());
         results.0.resize(self.offset.0.len(), None);
         for (SignedIndex(sign, index), original) in self.permutation.iter().zip(value.0.iter()) {
-            results.0[*index as usize] = original.map(|v| self.offset.0[*index as usize] + sign.apply(v));
+            results.0[*index as usize] = original.map(|v| sign.apply(v));
         }
         results
     }

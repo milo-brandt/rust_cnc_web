@@ -1,5 +1,6 @@
 #[allow(unused_imports)] // This is used? Clippy thinks it's not for some reason
 use ndarray::array;
+use nom::error::ErrorKind;
 use {
     super::messages::*,
     ndarray::Array1,
@@ -355,13 +356,12 @@ where
             take_until_through(":"),
             |head| -> Box<dyn Parser<&'a str, GrblMessage, Error>> {
                 match head {
-                    "PRB" => Box::new(
-                        separated_pair(parse_float_array, tag(":"), parse_u64.map(|u| u != 0)).map(
-                            |(position, success)| {
-                                GrblMessage::ProbeEvent(ProbeEvent { success, position })
-                            },
-                        ),
-                    ),
+                    "PRB" => Box::new(|input: &'a str| -> IResult<&'a str, GrblMessage, Error> {
+                        let (before, after) = input.split_once(":").ok_or(nom::Err::Error(Error::from_error_kind(input, ErrorKind::Tag)))?;
+                        let position = parse_float_array(before)?.1;
+                        let (remaining, value) = parse_u64(after)?;
+                        Ok((remaining, GrblMessage::ProbeEvent(ProbeEvent { success: value != 0, position })))
+                    }),
                     _ => Box::new(fail),
                 }
             },
@@ -552,5 +552,12 @@ mod tests {
         let result: Result<_, nom::Err<VerboseError<_>>> = parse_grbl_status(input);
         let status = GrblStatus::new(GrblState::Idle, GrblPosition::Work(array![0.0, 1.0, 3.0]));
         assert_eq!(result, Ok(("", status)));
+    }
+
+    #[test]
+    fn test_parse_probe() {
+        let input = "[PRB:697.000,150.000,-31.000,0.000:1]";
+        let result = parse_grbl_line(input);
+        assert_eq!(result, GrblMessage::ProbeEvent(ProbeEvent { success: true, position: array![697.0, 150.0, -31.000, 0.0] }))
     }
 }

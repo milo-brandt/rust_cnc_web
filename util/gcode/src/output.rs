@@ -1,6 +1,6 @@
 use std::{fmt::{Display, Formatter, self}, cell::Cell};
 
-use crate::{config::MachineConfiguration, gcode::{Line, CommandContent, MotionMode, LinearMove, ProbeMove, HelicalMove, Orientation, ArcPlane, ModalUpdates, CoordinateMode, Units}, coordinates::{PartialPosition, PartialOffset}, probe::{ProbeMode, ProbeDirection, ProbeExpectation}};
+use crate::{config::MachineConfiguration, gcode::{Line, CommandContent, MotionMode, LinearMove, ProbeMove, HelicalMove, Orientation, ModalUpdates, CoordinateMode, Units, CoordinateSystem}, coordinates::{PartialPosition, PartialOffset, ArcPlane}, probe::{ProbeMode, ProbeDirection, ProbeExpectation}};
 
 pub struct MachineFormatter<'a, T>(pub &'a MachineConfiguration, pub T);
 
@@ -53,7 +53,13 @@ impl<'a, 'b> Display for MachineFormatter<'a, &'b Line> {
             coordinate_mode,
             units,
             arc_plane,
+            coordinate_system,
         } = &self.1.modal_updates;
+        // Output coordinate system
+        match coordinate_system {
+            Some(CoordinateSystem::Zero) => write_new_term!("G54"),
+            None => (),
+        }
         // Output coordinate mode
         match coordinate_mode {
             Some(CoordinateMode::Absolute) => write_new_term!("G90"),
@@ -110,6 +116,8 @@ impl<'a, 'b> Display for MachineFormatter<'a, &'b Line> {
 
 #[cfg(test)]
 mod test {
+    use crate::gcode::CoordinateSystem;
+
     use super::*;
     
     #[test]
@@ -121,7 +129,8 @@ mod test {
                 motion_mode: None,
                 coordinate_mode: Some(CoordinateMode::Absolute),
                 units: Some(Units::Millimeters),
-                arc_plane: Some(ArcPlane(2, 0))
+                arc_plane: Some(ArcPlane(2, 0)),
+                coordinate_system: Some(CoordinateSystem::Zero),
             },
             command: Some(CommandContent::HelicalMove(HelicalMove {
                 orientation: Orientation::Counterclockiwse,
@@ -131,7 +140,7 @@ mod test {
         }).to_string();
         assert_eq!(
             result,
-            "G90 G21 G18 G3 X1.000 Y2.000 Z3.000 A4.000 I5.000 J6.000 F1000.000"
+            "G54 G90 G21 G18 G3 X1.000 Y2.000 Z3.000 A4.000 I5.000 J6.000 F1000.000"
         );
     }
     #[test]
@@ -143,7 +152,8 @@ mod test {
                 motion_mode: Some(MotionMode::Rapid),
                 coordinate_mode: None,
                 units: None,
-                arc_plane: None
+                arc_plane: None,
+                coordinate_system: None,
             },
             command: Some(CommandContent::LinearMove(LinearMove(PartialPosition(vec![Some(1.0), Some(2.0), Some(3.0), None])))),
         }).to_string();

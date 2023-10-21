@@ -20,7 +20,7 @@ export default function TaskBar () {
   const elapsedSeconds = useElapsedSeconds(status?.startTime ?? null)
   const elapsedTimeString = mapMaybe(formatSeconds, elapsedSeconds)
 
-  const showTimeControls = machineStatus?.state?.type !== 'Idle'
+  const showTimeControls = Boolean(machineStatus?.state?.type !== 'Idle' || status)
   const showPause = machineStatus?.state?.type !== 'Hold'
 
   return (

@@ -1,0 +1,4 @@
+packages:
+  - "client_side/gcode-viewer"
+  - "client_side/react-frontend"
+  - "util/view-gcode"

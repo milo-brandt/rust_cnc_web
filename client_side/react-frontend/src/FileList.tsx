@@ -2,12 +2,12 @@ import { DirectoryItem, createDirectory, deleteFile, executeFile, uploadFile, us
 import { Link, useParams } from "react-router-dom";
 import { PageLoading, PageErrored } from "./ErrorState";
 import { flatten, groupBy } from "lodash";
-import { Box, Button, DialogActions, DialogContentText, DialogTitle, IconButton, Paper, Table, TableBody, TableCell, TableContainer, TableRow, TextField, Tooltip, Typography } from "@mui/material";
-import { ArrowUpward, CreateNewFolder, Delete, Download, Folder, PlayArrow, Search, UploadFile } from "@mui/icons-material";
+import { Box, Button, DialogActions, DialogContentText, DialogTitle, IconButton, Paper, Table, TableBody, TableCell, TableContainer, TableRow, Tooltip, Typography } from "@mui/material";
+import { ArrowUpward, CreateNewFolder, Delete, Download, Edit, Folder, PlayArrow, Search, UploadFile } from "@mui/icons-material";
 import { useStatusContext } from "./context/status";
 import { useSnackbar } from "./context/snackbar";
 import { useDialog } from "./context/modal";
-import { SyntheticEvent, useState } from "react";
+import { SyntheticEvent } from "react";
 import { Maybe } from "./util/types";
 import { HOST } from "./api/constants";
 import { stringDialog } from "./dialog/string";
@@ -140,6 +140,9 @@ export default function FileListPage() {
             </Tooltip>
             <Tooltip title="Inspect">
               <IconButton component={Link} to={`/view/${itemPath}/`}><Search /></IconButton>
+            </Tooltip>
+            <Tooltip title="Edit">
+              <IconButton component={Link} to={`/edit/${itemPath}/`}><Edit /></IconButton>
             </Tooltip>
             <Tooltip title="Download">
               <IconButton component={Link} to={`http://${HOST}/job/download_file/${itemPath}`}><Download /></IconButton>

@@ -70,6 +70,7 @@ impl<'a, Write: MachineWriter, H: Handler> MachineThread<'a, Write, H> {
                     format!("Error received: {}!", GrblMessage::get_error_text(index)),
                 );
                 let next_result = self.waiting_ok.pop_front();
+                // TODO: DEAL WITH ERRORS FROM PROBING!
                 match next_result {
                     Some(channel) => drop(channel.send(Err(LineError::Grbl(index)))),
                     None => self.handler.warn(
@@ -82,6 +83,9 @@ impl<'a, Write: MachineWriter, H: Handler> MachineThread<'a, Write, H> {
                 self.handler.warn(
                     format!("Alarm received: {}!", GrblMessage::get_alarm_text(index)),
                 );
+                for waiting in self.waiting_probe.drain(..) {
+                    drop(waiting.send(Err(ProbeError::Alarm)));
+                }        
             },
             GrblMessage::GrblOk => {
                 self.writer.pop_received_line().await.unwrap().map(|v| self.log_send(v));

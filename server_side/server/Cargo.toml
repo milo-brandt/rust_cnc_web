@@ -13,7 +13,7 @@ tower-layer = { version = "0.3" }
 futures = "0.3"
 tokio-stream = "0.1"
 tokio-serial = "5.4"
-ndarray = "0.15"
+ndarray = { version = "0.15", features = ["serde"] }
 nom = "7.1"
 hyper = "0.14"
 itertools = "0.10"

@@ -22,7 +22,7 @@ use oneway_websocket::send_stream;
 use tokio::runtime::{Runtime, Builder};
 use tokio_util::io::{StreamReader, ReaderStream};
 use tower_http::{catch_panic::CatchPanicLayer, trace::TraceLayer};
-use util::{history_broadcast, format_bytes::format_byte_string};
+use util::{history_broadcast, format_bytes::format_byte_string, force_output_type};
 use common::api;
 use clap::Parser;
 use anyhow::{anyhow, Context};
@@ -51,6 +51,22 @@ impl Config {
             None => Err(anyhow!("Invalid path! {:?}", path.as_ref())),
             Some(path) => {
                 let mut result = self.gcode_root();
+                result.push(path);
+                Ok(result)
+            }
+        }
+    }
+    pub fn jobs_root(&self) -> PathBuf {
+        self.data_folder.join("jobs")
+    }
+    pub fn new_job_path(&self) -> PathBuf {
+        self.data_folder.join("jobs").join(format!("job_{}", Local::now().timestamp()))
+    }
+    pub fn job_path(&self, path: impl AsRef<Path>) -> anyhow::Result<PathBuf> {
+        match lexically_normal_path(path.as_ref()) {
+            None => Err(anyhow!("Invalid path! {:?}", path.as_ref())),
+            Some(path) => {
+                let mut result = self.jobs_root();
                 result.push(path);
                 Ok(result)
             }
@@ -214,6 +230,9 @@ async fn run_server(machine: ImmediateHandle, debug_rx: history_broadcast::Recei
         .route("/job/list/*path", get(get_gcode_list_better))
         .route("/job/list/", get(get_gcode_list_better))
         .route("/job/examine/*path", get(get_gcode_file_positions_better))
+
+        .route(&format!("{}/*path", api::DOWNLOAD_RESULTS), get(download_job_results))
+        .route(api::LIST_RESULTS, get(get_results_list))
 
         .route(api::SEND_RAW_GCODE, post(run_gcode_unchecked))
         .route(api::LISTEN_TO_RAW_MACHINE, get(listen_raw))
@@ -500,6 +519,7 @@ async fn run_gcode_file(
             ).into());
         }
     }
+    let (results_tx, mut results_rx) = mpsc::channel(128);
     let result = machine.try_send_job(
         sized_stream_to_job(
             stream! {
@@ -526,8 +546,23 @@ async fn run_gcode_file(
                 }
             },
             line_count,
+            results_tx,
         )
     ).await;
+    let dirname = config.new_job_path();
+    spawn(force_output_type::<anyhow::Result<()>>(async move {
+        let mut result = Vec::new();
+        while let Some(v) = results_rx.recv().await {
+            result.push(v);
+        }
+        if !result.is_empty() {
+            let filename = dirname.join("probes.json");
+            create_dir_all(dirname).await?;
+            let mut file = File::create(filename).await?;
+            file.write_all(serde_json::to_string(&result)?.as_bytes()).await?;
+        }
+        Ok(())
+    }));
     match result {
         Ok(()) => Ok("Job sent!".to_string()),
         Err(_) => Err(anyhow!("Job not sent!").into()),
@@ -648,4 +683,29 @@ async fn shutdown() -> String {
             Err(err) => format!("Failed: {:?}", err),
         }
     }
+}
+
+async fn download_job_results(
+    path: extract::Path<String>,
+    config: Extension<Arc<Config>>,
+) -> ServerResult<Response> {
+    let path = config.job_path(&*path)?.join("probes.json");
+    let file = File::open(path).await?;
+    let body = BoxBody::new(StreamBody::new(ReaderStream::new(file)));
+    /* */
+    let response = Response::builder()
+        .header("Content-Type", "text/plain;")
+        .header("Content-Disposition", "inline;")
+        .body(body)?;
+    Ok(response)
+}
+
+async fn get_results_list(config: Extension<Arc<Config>>) -> ServerResult<Json<Vec<String>>> {
+    let mut entries = read_dir(config.jobs_root()).await?;
+    let mut values = Vec::new();
+    while let Some(entry) = entries.next_entry().await.unwrap() {
+        values.push(entry.file_name().into_string().map_err(|_| anyhow!("Failed to unwrap file name"))?);
+    }
+    values.sort_by(|a, b| b.cmp(&a));
+    Ok(Json(values))
 }

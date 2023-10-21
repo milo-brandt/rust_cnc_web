@@ -11,8 +11,9 @@ mod gcode;
 mod smooth_region;
 mod debug_show;
 
-use std::{fs, process, mem};
+use std::{fs, process, mem, collections::HashMap};
 
+use clap::Parser;
 use geos::{Geom, Geometry, CoordSeq};
 use itertools::chain;
 use multitool_path::{ForegroundCutInfo, CuttingStep};
@@ -35,23 +36,46 @@ struct WKTRow {
 // Given a geometry, return a list of polygons, from largest to smallest, of all offsets at a multiple of offset_size until the result is contained in minimum.
 
 
+#[derive(Parser, Debug)]
+struct Arguments {
+    input: String,
+    output: String,
+    names: Vec<String>,
+
+    #[arg(long)]
+    no_reverse: bool,
+}
+
+struct NamedGeometry<'a> {
+    name: String,
+    geometry: Geometry<'a>
+}
+
 fn main() {
     //let input = fs::read_to_string("../svg2wkt/practice_plain.json").expect("Failed to read file");
-    let input = fs::read_to_string("/home/milo/Documents/Modelling/Small Projects/CuttingBoard/sun.json").expect("Failed to read file");
+    let arguments = Arguments::parse();
+    fs::create_dir_all(&arguments.output).expect("Failed to create output directory");
+    let input = fs::read_to_string(&arguments.input).expect("Failed to read file");
 
     let values: Vec<WKTRow> = serde_json::from_str(&input).expect("Bad json!");
 
     let mut geometries = Vec::new();
-    let mut names = Vec::new();
+    let mut name_to_geometry = HashMap::new();
 
     for value in values {
-        names.push(value.label.unwrap());
-        geometries.push(
-            geos::Geometry::new_from_wkt(&value.wkt).and_then(|geo| geo.make_valid()).expect("Bad WKT")
-        );
+        if let Some(label) = value.label {
+            name_to_geometry.insert(
+                label,
+                geos::Geometry::new_from_wkt(&value.wkt).and_then(|geo| geo.make_valid()).expect("Bad WKT")
+            );
+        }
     }
-    geometries.swap(0, 1); // move canopy before trunk!
-    names.swap(0, 1); // move canopy before trunk!
+    for name in &arguments.names {
+        match name_to_geometry.get(name) {
+            Some(geometry) => geometries.push(Clone::clone(geometry)),
+            None => panic!("{} not found!", name),
+        }
+    }
 
     let result = sequence_cuts_non_bleeding(
         geometries,
@@ -62,12 +86,12 @@ fn main() {
     /* for path in &result {
         show_geometries(&vec![Clone::clone(path)]);
     }*/
-    show_geometries(&result);
+    // show_geometries(&result);
     let mut total = Geometry::create_multipolygon(Vec::new()).unwrap();
     for item in &result {
         total = total.union(item).unwrap();
     }
-    show_geometries(&vec![total]);
+    // show_geometries(&vec![total]);
 
     let very_coarse_info = CuttingStep {
         tool_radius: 25.4/8.0*3.0,
@@ -83,7 +107,7 @@ fn main() {
     let coarse_info = CuttingStep {
         tool_radius: 25.4/16.0,
         step_over: 25.4/16.0,
-        safety_margin: 25.4/80.0,
+        safety_margin: 25.4/160.0,
         simplification_tolerance: 0.025,
         quadsegs: 16,
         milling_mode: MillingMode::Climb,
@@ -92,7 +116,7 @@ fn main() {
     let fine_info = CuttingStep {
         tool_radius: 25.4/80.0,
         step_over: 25.4/80.0,
-        safety_margin: 0.0,
+        safety_margin: -25.4/200.0,
         simplification_tolerance: 0.025,
         quadsegs: 16,
         milling_mode: MillingMode::Climb,
@@ -109,23 +133,23 @@ fn main() {
         safe_height: 3.0,
         feedrate: 2000.0,
         z_max: 0.0,
-        z_min: -3.0,
+        z_min: -25.4/32.0 * 1.0,
         z_step: 4.0,
     };
     let fine_stroke = StrokeOptions {
         safe_height: 3.0,
         feedrate: 700.0,
         z_max: 0.0,
-        z_min: -3.0,
+        z_min: -25.4/32.0 * 1.0,
         z_step: 0.61,
     };
 
 
     // Foreground cut
     for (index, item) in result.iter().enumerate() {
-        let name = &names[index];
+        let name = &arguments.names[index];
 
-        let reflect_if_needed = |paths| if index == 0 {
+        let reflect_if_needed = |paths| if index == 0 || arguments.no_reverse {
             paths
         } else {
             reflect_paths(paths)
@@ -145,8 +169,10 @@ fn main() {
             };        
         }
 
-        let target_region = item.envelope().unwrap().buffer(25.4*0.125, 16).unwrap();
-        let total_region = item.envelope().unwrap().buffer(25.4*0.25, 16).unwrap();
+        let circle = geos::Geometry::create_point(CoordSeq::new_from_vec(&[&[22.5, 22.5]]).unwrap()).unwrap().buffer(22.49, 64).unwrap();
+
+        let target_region = item.envelope().unwrap().buffer(25.4*0.125, 16).unwrap().intersection(&circle).unwrap();
+        let total_region = item.envelope().unwrap().buffer(25.4*0.25, 16).unwrap().intersection(&circle).unwrap();
         let required_region = target_region.difference(item).unwrap();
         let allowed_region = total_region.difference(item).unwrap();
     
@@ -175,9 +201,9 @@ fn main() {
         let fine_gcode = stroke_paths(&fine_stroke, &reflect_if_needed(paths_to_coordinates(&fine_step).unwrap()));
 
 
-        fs::write(format!("inlay_sun_{}_very_coarse_path.nc", name), very_coarse_gcode).unwrap();
-        fs::write(format!("inlay_sun_{}_coarse_path.nc", name), format!("{}\n\n\n\n{}", facing_gcode, coarse_gcode)).unwrap();
-        fs::write(format!("inlay_sun_{}_fine_path.nc", name), fine_gcode).unwrap();
+        fs::write(format!("{}/{}_very_coarse_path.nc", arguments.output, name), very_coarse_gcode).unwrap();
+        fs::write(format!("{}/{}_coarse_path.nc", arguments.output, name), coarse_gcode).unwrap();
+        fs::write(format!("{}/{}_fine_path.nc", arguments.output, name), fine_gcode).unwrap();
     }
 
 }

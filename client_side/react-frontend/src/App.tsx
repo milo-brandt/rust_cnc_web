@@ -29,8 +29,16 @@ const router = createBrowserRouter([
         element: createElement(lazy(() => import("./ViewPage")))
       },
       {
+        path: '/edit/*',
+        element: createElement(lazy(() => import("./Editor")))
+      },
+      {
         path: '/debug',
         element: createElement(lazy(() => import("./DebugPage")))
+      },
+      {
+        path: '/results',
+        element: createElement(lazy(() => import("./ResultList")))
       }
     ]
   },

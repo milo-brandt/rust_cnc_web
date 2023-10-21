@@ -6,5 +6,8 @@
     "server_side/machine_mock/Cargo.toml",
     "./server_side/server/Cargo.toml",
     "util/watch_exec/Cargo.toml",
+    "util/gcode/Cargo.toml",
+    "util/gcode-cli/Cargo.toml",
+    "util/view-gcode/src-tauri/Cargo.toml",
 ]
 }

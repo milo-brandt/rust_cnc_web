@@ -39,6 +39,7 @@ export default function HomePage() {
         <ListItemLink to="/gcode" primary="Files"/>
         <ListItemLink to="/control" primary="Control"/>
         <ListItemLink to="/debug" primary="Debug"/>
+        <ListItemLink to="/results" primary="Result"/>
       </List>
     </>
   )

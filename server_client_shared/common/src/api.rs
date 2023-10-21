@@ -95,6 +95,14 @@ pub const RAPID_OVERRIDE: RapidOverride = RapidOverride {
     half: "/command/override/rapid/half",
     quarter: "/command/override/rapid/quarter",
 };
+
+///////
+// Job Results
+///////
+
+pub const LIST_RESULTS: &str = "/results";
+pub const DOWNLOAD_RESULTS: &str = "/results/download";
+
 ///////
 // MISC
 ///////

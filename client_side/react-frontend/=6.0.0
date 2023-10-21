@@ -1,0 +1,11 @@
+../..                                    | Progress: resolved 0, reused 1, downloaded 0, added 0
+../..                                    | Progress: resolved 178, reused 139, downloaded 2, added 0
+../..                                    | Progress: resolved 381, reused 349, downloaded 2, added 0
+../..                                    |   +9   -7 +-
+../..                                    | Progress: resolved 402, reused 370, downloaded 2, added 0
+
+dependencies:
++ @codemirror/view 6.21.3
++ @emotion/react 11.11.1
+
+../..                                    | Progress: resolved 402, reused 370, downloaded 2, added 9, done

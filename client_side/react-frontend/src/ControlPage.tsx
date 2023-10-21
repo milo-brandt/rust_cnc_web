@@ -8,7 +8,7 @@ import { cncAxios } from "./api/cncAxios";
 import { Maybe } from "./util/types";
 import { useLocalStorage } from "./util/hooks";
 import { OffsetKind, Offsets, SavedPosition, Vec3, deleteCoordinateOffset, recordPosition, setCoordinateOffset, useCoordinates, usePositions } from "./api/coords";
-import { range, update } from "lodash";
+import { range } from "lodash";
 import { DialogPromiseFactory, useDialog } from "./context/modal";
 import { stringDialog } from "./dialog/string";
 
@@ -356,7 +356,7 @@ function useCoordinateDialogFactory() {
 function replaceIndex<T>(arr: T[], index: number, value: T): T[] {
   return [...arr.slice(0, index), value, ...arr.slice(index + 1)]
 }
-function parseOptionalNumber<T>(input: string): { type: "ok", value: Maybe<number> } | { type: "error" } {
+function parseOptionalNumber(input: string): { type: "ok", value: Maybe<number> } | { type: "error" } {
   if(input === '') {
     return { type: "ok", value: null };
   }

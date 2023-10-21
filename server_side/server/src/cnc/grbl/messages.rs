@@ -3,6 +3,7 @@ use std::borrow::Cow;
 use ndarray::Array1;
 pub use common::grbl::GrblState;
 use common::grbl::GrblFullInfo;
+use serde::Serialize;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum GrblPosition {
@@ -118,9 +119,23 @@ impl GrblStateInfo {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+mod array_serializer {
+    use ndarray::Array1;
+    use serde::{Serializer, Serialize, Deserializer, Deserialize};
+
+    pub fn serialize<S: Serializer>(array: &Array1<f64>, serializer: S) -> Result<S::Ok, S::Error> {
+        array.to_vec().serialize(serializer)
+    }
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Array1<f64>, D::Error> {
+        let vec = Vec::<f64>::deserialize(deserializer)?;
+        Ok(vec.into_iter().collect())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct ProbeEvent {
     pub success: bool,
+    #[serde(with="array_serializer")]
     pub position: Array1<f64>,
 }
 #[allow(clippy::large_enum_variant)]

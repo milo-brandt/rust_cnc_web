@@ -1,12 +1,13 @@
 use std::pin::Pin;
 
-use futures::{Stream, StreamExt, pin_mut, Future, FutureExt};
+use futures::{Stream, StreamExt, pin_mut, Future, FutureExt, SinkExt};
+use tokio::sync::mpsc;
 
 use crate::cnc::gcode::{GCodeLine, GCodeCommand};
 
-use super::{gcode::parser::GeneralizedLineOwned, grbl::standard_handler::{JobHandle, JobFail}};
+use super::{gcode::parser::GeneralizedLineOwned, grbl::{standard_handler::{JobHandle, JobFail}, messages::ProbeEvent}};
 
-pub fn sized_stream_to_job<S>(stream: S, total_lines: usize) -> impl FnOnce(JobHandle) -> Pin<Box<dyn Future<Output=()> + Send + 'static>> + Send + 'static
+pub fn sized_stream_to_job<S>(stream: S, total_lines: usize, results: mpsc::Sender<ProbeEvent>) -> impl FnOnce(JobHandle) -> Pin<Box<dyn Future<Output=()> + Send + 'static>> + Send + 'static
 where
     S: Stream<Item=GeneralizedLineOwned> + Send + 'static
 {
@@ -21,7 +22,20 @@ where
                     job_handle.set_status(format!("At line {}/{}", line_num, total_lines)).await?;
                     match v {
                         // If we wished, the next line could have its future handled for whether we get "ok" or "error".
-                        GeneralizedLineOwned::Line(line) => drop(job_handle.send_gcode(line).await?),
+                        GeneralizedLineOwned::Line(line) => {
+                            if line.command.as_ref().is_some_and(|v| if let GCodeCommand::Probe { .. } = &v { true } else { false }) {
+                                let (line_result, probe_result) = job_handle.send_probe_gcode(line).await?;
+                                line_result.await.map_err(|_| JobFail)?;
+                                let probe_event = probe_result.await.map_err(|_| JobFail)?;
+                                job_handle.send_comment(format!(
+                                    "PROBE RESULT: {}",
+                                    serde_json::to_string(&probe_event).unwrap()
+                                )).await?;
+                                drop(results.send(probe_event).await);
+                            } else {
+                                drop(job_handle.send_gcode(line).await?)
+                            }
+                        },
                         GeneralizedLineOwned::Comment(comment) => job_handle.send_comment(comment.to_string()).await?,
                         GeneralizedLineOwned::Empty => {},
                     }

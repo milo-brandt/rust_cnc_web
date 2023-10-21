@@ -13,6 +13,7 @@ pub enum LineError {
 pub enum ProbeError {
     Grbl(u64),
     Reset,
+    Alarm,
 }
 #[derive(Debug)]
 pub enum WriteRequest {

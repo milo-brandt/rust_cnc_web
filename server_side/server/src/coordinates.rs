@@ -17,7 +17,8 @@ pub async fn get_service(config: &Config) -> anyhow::Result<Router> {
     ).await?;
     let router = Router::new()
         .route("/offsets", get(list_offsets).delete(remove_offset).put(set_offset))
-        .route("/positions", get(list_positions).post(add_position).layer(ExclusiveExtension::new(positions)))
+        .route("/positions", get(list_positions).post(add_position)
+        .layer(ExclusiveExtension::new(positions)))
         .layer(ExclusiveExtension::new(coordinates));
     Ok(router)
 }

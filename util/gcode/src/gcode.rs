@@ -1,26 +1,15 @@
 use std::{collections::HashMap, ops::Neg};
 
-use crate::{probe::ProbeMode, coordinates::{PartialPosition, PartialOffset}, transform::{SimpleTransform, Transform, TryTransform, Sign}};
+use crate::{probe::ProbeMode, coordinates::{PartialPosition, PartialOffset, Sign, ArcPlane}};
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub struct ArcPlane(pub u8, pub u8);
-impl ArcPlane {
-    pub fn compare(lhs: &ArcPlane, rhs: &ArcPlane) -> Option<Sign> {
-        if lhs.0 == rhs.0 && lhs.1 == rhs.1 {
-            Some(Sign::Positive)
-        } else if lhs.1 == rhs.0 && lhs.0 == rhs.1 {
-            Some(Sign::Negative)
-        } else {
-            None
-        }
-    }
-}
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum CoordinateMode { Absolute } // or Incremental - unsupported
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Units { Millimeters } // or inches - unsupported
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum MotionMode { Controlled, Rapid }
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum CoordinateSystem { Zero }
 #[derive(Copy, Clone, Debug, PartialEq)]
 pub struct ModalUpdates {
     pub feedrate: Option<f64>,
@@ -28,6 +17,7 @@ pub struct ModalUpdates {
     pub coordinate_mode: Option<CoordinateMode>,
     pub units: Option<Units>,
     pub arc_plane: Option<ArcPlane>,
+    pub coordinate_system: Option<CoordinateSystem>,
 }
 
 
@@ -59,74 +49,71 @@ pub enum CommandContent {
     HelicalMove(HelicalMove),
     ProbeMove(ProbeMove),
 }
+impl CommandContent {
+    pub fn target(&self) -> &PartialPosition {
+        match self {
+            CommandContent::LinearMove(LinearMove(target)) => target,
+            CommandContent::HelicalMove(HelicalMove { target, .. }) => target,
+            CommandContent::ProbeMove(ProbeMove(_, target)) => target,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Line {
     pub modal_updates: ModalUpdates,
     pub command: Option<CommandContent>,
 }
 
-pub struct CommandTransformer<'a> {
-    orientation_sign: Option<Sign>,
-    planes: Vec<ArcPlane>,
-    transformation: &'a SimpleTransform,
+/// A representation of the (partial) modal state of a machine, as it may or may not be known.
+pub struct MachineState {
+    pub feedrate: Option<f64>,
+    pub motion_mode: Option<MotionMode>,
+    pub coordinate_mode: Option<CoordinateMode>,
+    pub units: Option<Units>,
+    pub arc_plane: Option<ArcPlane>,
+    pub coordinate_system: Option<CoordinateSystem>,
+    pub position: PartialPosition,
 }
-pub enum CommandTransformError {
-    UnknownOrientationSign,
-    InvalidArcPlane(u8, u8),
-}
-impl<'a> CommandTransformer<'a> {
-    pub fn new(transformation: &'a SimpleTransform, planes: Vec<ArcPlane>) -> Self {
-        CommandTransformer {
-            // If this is a translation, we don't need to re-orient anything, even if we don't know the arc plane.
-            orientation_sign: if transformation.is_translation() { Some(Sign::Positive) } else { None },
-            planes,
-            transformation
+impl MachineState {
+    pub fn new(axis_count: u8) -> Self {
+        Self {
+            feedrate: None,
+            motion_mode: None,
+            coordinate_mode: None,
+            units: None,
+            arc_plane: None,
+            coordinate_system: None,
+            position: PartialPosition((0..axis_count).map(|_| None).collect())
         }
     }
-    pub fn transform(&mut self, line: &Line) -> Result<Line, CommandTransformError> {
-        let arc_plane = if let Some(arc_plane) = line.modal_updates.arc_plane {
-            let first_index = self.transformation.permutation[arc_plane.0 as usize];
-            let second_index = self.transformation.permutation[arc_plane.1 as usize];
-            let desired_plane = ArcPlane(first_index.1, second_index.1);
-            let (new_plane, new_sign) = self.planes
-                .iter()
-                .find_map(|plane| ArcPlane::compare(plane, &desired_plane).map(|sign| (plane, sign)))
-                .ok_or_else(|| CommandTransformError::InvalidArcPlane(first_index.1, second_index.1))?;
-            self.orientation_sign = Some(new_sign);
-            Some(*new_plane)
-        } else {
-            None
-        };
-        let command = match &line.command {
-            Some(CommandContent::LinearMove(LinearMove(target))) => Some(CommandContent::LinearMove(LinearMove(self.transformation.transform(target)))),
-            Some(CommandContent::ProbeMove(ProbeMove(mode, target))) => Some(CommandContent::ProbeMove(ProbeMove(*mode, self.transformation.transform(target)))),
-            Some(CommandContent::HelicalMove(HelicalMove { orientation, target, center })) => {
-                let orientation_sign = self.orientation_sign.ok_or(CommandTransformError::UnknownOrientationSign)?;
-                Some(CommandContent::HelicalMove(HelicalMove {
-                    orientation: orientation_sign.apply(*orientation),
-                    target: self.transformation.transform(target),
-                    center: self.transformation.transform(center)
-                }))
-            },
-            None => None,
-        };
-        Ok(Line {
-            modal_updates: ModalUpdates {
-                arc_plane,
-                ..line.modal_updates
-            },
-            command,
-        })
-    }
-}
+    pub fn update_by(&mut self, line: &Line) {
+        fn set_if_some<T: Clone>(target: &mut Option<T>, value: &Option<T>) {
+            if value.is_some() {
+                *target = value.clone();
+            }
+        }
+        let ModalUpdates { 
+            feedrate,
+            motion_mode,
+            coordinate_mode,
+            units,
+            arc_plane,
+            coordinate_system
+        } = &line.modal_updates;
 
-pub struct ArcPlaneCommand {
-    pub command: String,
-    pub primary_axis: u8,
-    pub secondary_axis: u8,
-}
-pub struct AxisConfiguration {
-    pub axis_names: Vec<char>,
-    pub offset_axis_names: Vec<char>,
-    pub arc_planes: Vec<ArcPlaneCommand>,
+        set_if_some(&mut self.feedrate, feedrate);
+        set_if_some(&mut self.motion_mode, motion_mode);
+        set_if_some(&mut self.coordinate_mode, coordinate_mode);
+        set_if_some(&mut self.units, units);
+        set_if_some(&mut self.arc_plane, arc_plane);
+        set_if_some(&mut self.coordinate_system, coordinate_system);
+        if let Some(target) = line.command.as_ref().map(CommandContent::target) {
+            self.position.update_from(target);
+        }
+    }
+    pub fn update_by_value(mut self, line: &Line) -> Self {
+        self.update_by(line);
+        self
+    }
 }

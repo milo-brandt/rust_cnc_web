@@ -6,9 +6,6 @@ use clap::Parser;
 use itertools::Itertools;
 use roxmltree::Document;
 use serde::Serialize;
-use svg_parser::Loop; 
-
-const FILENAME: &str = "/home/milo/Documents/Modelling/CuttingBoard/separated.svg";
 
 fn tuple_diff(lhs: &(f64, f64), rhs: &(f64, f64)) -> (f64, f64) {
     (lhs.0 - rhs.0, lhs.1 - rhs.1)
@@ -145,7 +142,6 @@ fn loops_to_polygons_from_sorted(mut loops: Vec<Vec<(f64, f64)>>) -> Vec<Polygon
             Some(exterior) => exterior,
             None => return result
         };
-        println!("CONSIDER AREA OF {}", signed_area(&exterior));
         // Now, iterate through all loops in reverse order of size; if any are inside, they are probably holes.
         let mut holes = Vec::new();
         let mut for_next_iteration = Vec::new();
@@ -157,13 +153,7 @@ fn loops_to_polygons_from_sorted(mut loops: Vec<Vec<(f64, f64)>>) -> Vec<Polygon
                     winding_number(&inner_candidate[0], &candidate) != 0
                 });
                 let has_hole = !inside_hole.is_empty();
-                if !inside_hole.is_empty() {
-                    println!("INSIDE HOLE: {} {}", signed_area(&candidate), inside_hole.len());
-                }
                 result.extend(loops_to_polygons_from_sorted(inside_hole).into_iter());
-                if !has_hole {
-                    println!("DONE WITH HOLE!");
-                }
                 loops = not_inside_hole;
                 holes.push(candidate);
             } else {
@@ -188,13 +178,21 @@ fn loops_to_polygons(mut loops: Vec<Vec<(f64, f64)>>) -> Vec<Polygon> {
 
 
 #[derive(Parser, Debug)]
-#[command(author="Milo Brandt", about="A utility for converting from SVGs with only line elements to WKTs.")]
+#[command(
+    author="Milo Brandt",
+    about="A utility for converting from SVGs with only line elements to WKTs.",
+    long_about="Extracts all SVGs from the input file and outputs a JSON file consisting of \
+    a list of values of the form { label: string | null, wkt: string } where label is extracted \
+    from the Inkscape-written label. Only works on paths that have been converted to have only \
+    linear segments.
+    "
+)]
 struct Arguments {
     /// A path to an SVG file to input
-    input_file: String,
+    input: String,
 
     /// A path to output a JSON file with the conversion
-    output_file: String,
+    output: String,
 }
 
 #[derive(Serialize)]
@@ -205,23 +203,15 @@ struct WKTRow {
 
 fn main() {
     let args = Arguments::parse();
-    let data = read_to_string(&args.input_file).unwrap();
+    let data = read_to_string(&args.input).unwrap();
     let parsed_document = Document::parse(&data).unwrap();
     let mut rows = Vec::new();
     for item in parsed_document.descendants().filter(|item| {
         item.is_element() && item.tag_name().name() == "path"
     }) {
         let loops = svg_parser::parse_path(item.attribute("d").unwrap()).unwrap();
-        let loops_len = loops.len();
         let loops = loops.into_iter().map(|l| l.positions).collect_vec();
         let polygons = loops_to_polygons(loops);
-        /* println!("LABEL: {:?} PATHS: {:?} POLYGONS: {:?}", item.attribute(("http://www.inkscape.org/namespaces/inkscape","label")).unwrap(), loops_len, polygons.len());
-        for polygon in polygons {
-            println!("\tAREA: {} HOLES: {}", signed_area(&polygon.exterior), polygon.holes.len());
-        } */
-        for _ in 0..100 {
-            println!("");
-        }
         let label = item.attribute(("http://www.inkscape.org/namespaces/inkscape","label"));
         let wkt = to_wkt_polygons(&polygons);
         rows.push(WKTRow {
@@ -230,7 +220,7 @@ fn main() {
         });
     }
     std::fs::write(
-        args.output_file,
+        args.output,
         serde_json::to_string_pretty(&rows).unwrap(),
     ).unwrap();
 }

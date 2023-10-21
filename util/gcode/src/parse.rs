@@ -1,4 +1,4 @@
-use crate::{gcode::{Line, Orientation, LinearMove, CommandContent, HelicalMove, ProbeMove, ModalUpdates, MotionMode, CoordinateMode, Units, ArcPlane}, probe::{ProbeMode, ProbeDirection, ProbeExpectation}, config::MachineConfiguration, coordinates::{PartialPosition, PartialOffset}};
+use crate::{gcode::{Line, Orientation, LinearMove, CommandContent, HelicalMove, ProbeMove, ModalUpdates, MotionMode, CoordinateMode, Units, CoordinateSystem}, probe::{ProbeMode, ProbeDirection, ProbeExpectation}, config::MachineConfiguration, coordinates::{PartialPosition, PartialOffset, ArcPlane}};
 
 struct Item<'a> {
     head: &'a str,
@@ -124,6 +124,14 @@ fn parse_item_set<'a>(config: &MachineConfiguration, mut item_set: ItemSet<'a>) 
         } else {
             None
         }),
+        coordinate_system: item_set.pop_map(|item| if item.head == "G" {
+            match item.value {
+                "54" => Some(CoordinateSystem::Zero),
+                _ => None,
+            }
+        } else {
+            None
+        }),
         units: item_set.pop_map(|item| if item.head == "G" {
             match item.value {
                 "21" => Some(Units::Millimeters),
@@ -161,7 +169,7 @@ mod test {
     #[test]
     fn test_helix() {
         let config = MachineConfiguration::standard_4_axis();
-        let input = "G90 G21 G18 G3 X1.000 Y2.000 Z3.000 A4.000 I5.000 J6.000 F1000.000";
+        let input = "G54 G90 G21 G18 G3 X1.000 Y2.000 Z3.000 A4.000 I5.000 J6.000 F1000.000";
         assert_eq!(
             parse_line(&config, input),
             Some(Line {
@@ -170,7 +178,8 @@ mod test {
                     motion_mode: None,
                     coordinate_mode: Some(CoordinateMode::Absolute),
                     units: Some(Units::Millimeters),
-                    arc_plane: Some(ArcPlane(2, 0))
+                    arc_plane: Some(ArcPlane(2, 0)),
+                    coordinate_system: Some(CoordinateSystem::Zero)
                 },
                 command: Some(CommandContent::HelicalMove(HelicalMove {
                     orientation: Orientation::Counterclockiwse,
@@ -192,7 +201,8 @@ mod test {
                     motion_mode: Some(MotionMode::Rapid),
                     coordinate_mode: None,
                     units: None,
-                    arc_plane: None
+                    arc_plane: None,
+                    coordinate_system: None,
                 },
                 command: Some(CommandContent::LinearMove(LinearMove(PartialPosition(vec![Some(1.0), Some(2.0), Some(3.0), None])))),
             })

@@ -7,6 +7,8 @@ pub mod probe;
 pub mod gcode;
 /// A module representing transforms by the symmetries of a (hyper-)cube.
 pub mod simple;
+/// A module with utilities for creating transforms that operate based on input points.
+pub mod pointwise;
 pub mod coordinates;
 pub mod config;
 pub mod output;

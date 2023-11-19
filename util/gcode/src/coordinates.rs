@@ -8,6 +8,11 @@ pub struct Offset(pub Vec<f64>);
 #[derive(Debug, Clone, PartialEq)]
 pub struct PartialPosition(pub Vec<Option<f64>>);
 impl PartialPosition {
+    pub fn empty(len: u8) -> Self {
+        let mut contents = Vec::new();
+        contents.resize(len as usize, None);
+        PartialPosition(contents)
+    }
     pub fn update_from(&mut self, other: &PartialPosition) {
         for (current, new) in self.0.iter_mut().zip(other.0.iter()) {
             if let Some(v) = new {

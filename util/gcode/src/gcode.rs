@@ -1,4 +1,4 @@
-use std::{collections::HashMap, ops::Neg};
+use std::ops::Neg;
 
 use crate::{probe::ProbeMode, coordinates::{PartialPosition, PartialOffset, Sign, ArcPlane}};
 

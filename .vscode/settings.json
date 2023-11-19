@@ -8,6 +8,7 @@
     "util/watch_exec/Cargo.toml",
     "util/gcode/Cargo.toml",
     "util/gcode-cli/Cargo.toml",
+    "util/gcode-playground/Cargo.toml",
     "util/view-gcode/src-tauri/Cargo.toml",
 ]
 }

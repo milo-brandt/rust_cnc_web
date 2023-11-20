@@ -68,7 +68,7 @@ fn parse_item_set<'a>(config: &MachineConfiguration, mut item_set: ItemSet<'a>) 
         if item.head != "G" { return None; }
         match item.value {
             "2" => Some(PrimaryCommand::HelicalMove(Orientation::Clockwise)),
-            "3" => Some(PrimaryCommand::HelicalMove(Orientation::Counterclockiwse)),
+            "3" => Some(PrimaryCommand::HelicalMove(Orientation::Counterclockwise)),
             "38.2" => Some(PrimaryCommand::ProbeMove(ProbeMode(ProbeDirection::Towards, ProbeExpectation::MustChange))),
             "38.3" => Some(PrimaryCommand::ProbeMove(ProbeMode(ProbeDirection::Towards, ProbeExpectation::MayChange))),
             "38.4" => Some(PrimaryCommand::ProbeMove(ProbeMode(ProbeDirection::Away, ProbeExpectation::MustChange))),
@@ -95,7 +95,12 @@ fn parse_item_set<'a>(config: &MachineConfiguration, mut item_set: ItemSet<'a>) 
                 }
             )).collect());
             offset.0.resize(config.axis_characters.len(), None); // fill in any axes that may not have incremental characters
-            Some(CommandContent::HelicalMove(HelicalMove { orientation, target: axis_words, center: offset }))
+            let rotations = item_set.pop_map(|item| if item.head == "P" {
+                return item.value.parse().ok()
+            } else {
+                return None
+            }).unwrap_or(1);
+            Some(CommandContent::HelicalMove(HelicalMove { orientation, target: axis_words, center: offset, rotations }))
         },
         Some(PrimaryCommand::ProbeMove(probe_mode)) => Some(
             CommandContent::ProbeMove(ProbeMove(probe_mode, axis_words))
@@ -182,9 +187,10 @@ mod test {
                     coordinate_system: Some(CoordinateSystem::Zero)
                 },
                 command: Some(CommandContent::HelicalMove(HelicalMove {
-                    orientation: Orientation::Counterclockiwse,
+                    orientation: Orientation::Counterclockwise,
                     target: PartialPosition(vec![Some(1.0), Some(2.0), Some(3.0), Some(4.0)]),
-                    center: PartialOffset(vec![Some(5.0), Some(6.0), None, None])
+                    center: PartialOffset(vec![Some(5.0), Some(6.0), None, None]),
+                    rotations: 1,
                 })),
             })
         );

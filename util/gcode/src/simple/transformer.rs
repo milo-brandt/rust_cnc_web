@@ -37,12 +37,13 @@ impl<'a> CommandTransformer<'a> {
         let command = match &line.command {
             Some(CommandContent::LinearMove(LinearMove(target))) => Some(CommandContent::LinearMove(LinearMove(self.transformation.transform(target)))),
             Some(CommandContent::ProbeMove(ProbeMove(mode, target))) => Some(CommandContent::ProbeMove(ProbeMove(*mode, self.transformation.transform(target)))),
-            Some(CommandContent::HelicalMove(HelicalMove { orientation, target, center })) => {
+            Some(CommandContent::HelicalMove(HelicalMove { orientation, target, center, rotations })) => {
                 let orientation_sign = self.orientation_sign.ok_or(CommandTransformError::UnknownOrientationSign)?;
                 Some(CommandContent::HelicalMove(HelicalMove {
                     orientation: orientation_sign.apply(*orientation),
                     target: self.transformation.transform(target),
-                    center: self.transformation.transform(center)
+                    center: self.transformation.transform(center),
+                    rotations: *rotations,
                 }))
             },
             None => None,

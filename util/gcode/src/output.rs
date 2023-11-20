@@ -97,12 +97,15 @@ impl<'a, 'b> Display for MachineFormatter<'a, &'b Line> {
                 };
                 write_new_term!("{} {}", command_name, MachineFormatter(self.0, target));
             }
-            Some(CommandContent::HelicalMove(HelicalMove { orientation, target, center })) => {
+            Some(CommandContent::HelicalMove(HelicalMove { orientation, target, center, rotations })) => {
                 let command_name = match orientation {
                     Orientation::Clockwise => "G2",
-                    Orientation::Counterclockiwse => "G3"
+                    Orientation::Counterclockwise => "G3"
                 };
                 write_new_term!("{} {} {}", command_name, MachineFormatter(self.0, target), MachineFormatter(self.0, center));
+                if *rotations > 1 {
+                    write!(f, " P{}", rotations)?;
+                }
             }
             None => (),
         }
@@ -133,9 +136,10 @@ mod test {
                 coordinate_system: Some(CoordinateSystem::Zero),
             },
             command: Some(CommandContent::HelicalMove(HelicalMove {
-                orientation: Orientation::Counterclockiwse,
+                orientation: Orientation::Counterclockwise,
                 target: PartialPosition(vec![Some(1.0), Some(2.0), Some(3.0), Some(4.0)]),
-                center: PartialOffset(vec![Some(5.0), Some(6.0), None, None])
+                center: PartialOffset(vec![Some(5.0), Some(6.0), None, None]),
+                rotations: 1,
             })),
         }).to_string();
         assert_eq!(

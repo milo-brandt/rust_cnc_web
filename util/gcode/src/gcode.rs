@@ -24,13 +24,13 @@ pub struct ModalUpdates {
 #[derive(Debug, Clone, PartialEq)]
 pub struct LinearMove(pub PartialPosition);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Orientation { Clockwise, Counterclockiwse }
+pub enum Orientation { Clockwise, Counterclockwise }
 impl Neg for Orientation {
     type Output = Orientation;
     fn neg(self) -> Self::Output {
         match self {
-            Orientation::Clockwise => Orientation::Counterclockiwse,
-            Orientation::Counterclockiwse => Orientation::Clockwise,
+            Orientation::Clockwise => Orientation::Counterclockwise,
+            Orientation::Counterclockwise => Orientation::Clockwise,
         }
     }
 }
@@ -39,6 +39,8 @@ pub struct HelicalMove {
     pub orientation: Orientation,
     pub target: PartialPosition,
     pub center: PartialOffset,
+    /// Number of full turns in this move; 1 is the default, representing angles in (0, 360 deg]; 2 represents (360, 720].
+    pub rotations: u64,
 }
 #[derive(Debug, Clone, PartialEq)]
 pub struct ProbeMove(pub ProbeMode, pub PartialPosition);

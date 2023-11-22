@@ -179,6 +179,13 @@ export default function ViewPage() {
   let [rotation, multiplyRotation] = useReducer((state: Quaternion, change: Quaternion) => {
     return change.mul(state).normalize();
   }, new Quaternion());
+  let [centerOffset, addCenterOffset] = useReducer(
+    (previous: [number, number, number], next: [number, number, number]): [number, number, number] => [
+      previous[0] + next[0],
+      previous[1] + next[1],
+      previous[2] + next[2]
+    ]
+  , [0.0, 0.0, 0.0]);
   const dragging = useRef(false);
   const { snackAsyncCatch } = useSnackbar();
 
@@ -230,21 +237,39 @@ export default function ViewPage() {
       }
     };
     canvas.onmousedown = event => {
-      if (event.buttons & 1) {
+      if (event.buttons & 5) {
         dragging.current = true;
       }
     }
     canvas.onmousemove = event => {
+      console.log(event.buttons);
       if (dragging.current && (event.buttons & 1)) {
         const factor = 0.001;
         const change = new Quaternion(0, -event.movementY * factor, -event.movementX * factor, 0).exp()
         multiplyRotation(change);
+      } else if(dragging.current && (event.buttons & 4)) {
+        const factor = 1;
+        const rotationMatrix = new Matrix(3, 3, rotation.inverse().toMatrix(true));
+        const basicChange = new Matrix(3, 1, [
+          [-event.movementX / zoom * factor],
+          [event.movementY / zoom * factor],
+          [0.0]
+        ]);
+        console.log("BASIC CHANGE", basicChange.values.map(row => row[0]));
+        const change = rotationMatrix.multiply(basicChange);
+        const changeArr = change.values.map(row => row[0]);
+        console.log("CHANGING BY", changeArr);
+        addCenterOffset([
+          changeArr[0],
+          changeArr[1],
+          -changeArr[2],
+        ] as [number, number, number])
       } else if(dragging.current) {
         // TODO: Mouse up should track globally...
         dragging.current = false;
       }
     };
-  }, []);
+  }, [zoom, rotation]);
 
   const render = useMemo(() => {
     if(lineResult.status !== "resolved" || lineResult.data.length === 0) {
@@ -269,9 +294,9 @@ export default function ViewPage() {
       const maxRange = pointMetadata.maxRange;
       //
       const translateAroundZero = new Matrix(4, 4, [
-        [1, 0, 0, -center[0]],
-        [0, 1, 0, -center[1]],
-        [0, 0, 1, -center[2]],
+        [1, 0, 0, -center[0] - centerOffset[0]],
+        [0, 1, 0, -center[1] - centerOffset[1]],
+        [0, 0, 1, -center[2] - centerOffset[2]],
         [0, 0, 0, 1]
       ])
       const shrinkToUnitSphere = new Matrix(4, 4, [
@@ -308,7 +333,7 @@ export default function ViewPage() {
       preparePoints(context).draw();
     }
     return render;
-  }, [lineResult, zoom, rotation, pointMetadata, zPosition, preparePoints, travelPosition]);
+  }, [lineResult, zoom, rotation, pointMetadata, zPosition, preparePoints, travelPosition, centerOffset]);
   
   if(lineResult.status == "loading") {
     return <PageLoading/>
@@ -430,6 +455,7 @@ export default function ViewPage() {
         <IconButton color="inherit" onClick={() => {
           multiplyRotation(rotation.inverse());
           multiplyZoom(1 / zoom);
+          addCenterOffset([-centerOffset[0], -centerOffset[1], -centerOffset[2]])
         }}>
           <RestartAlt color="inherit" sx={{
             fontSize:"2.5rem"

@@ -10,7 +10,7 @@ pub enum Units { Millimeters } // or inches - unsupported
 pub enum MotionMode { Controlled, Rapid }
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum CoordinateSystem { Zero }
-#[derive(Copy, Clone, Debug, PartialEq)]
+#[derive(Copy, Clone, Debug, PartialEq, Default)]
 pub struct ModalUpdates {
     pub feedrate: Option<f64>,
     pub motion_mode: Option<MotionMode>,
@@ -68,6 +68,7 @@ pub struct Line {
 }
 
 /// A representation of the (partial) modal state of a machine, as it may or may not be known.
+#[derive(Clone)]
 pub struct MachineState {
     pub feedrate: Option<f64>,
     pub motion_mode: Option<MotionMode>,

@@ -15,6 +15,7 @@ pub mod output;
 pub mod parse;
 /// Utilities for transforming GCode files into series of line segments.
 pub mod lines;
+pub mod tag;
 
 // pub fn transform_gcode_file(
 //     config: &MachineConfiguration,

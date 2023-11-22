@@ -1,8 +1,8 @@
-use std::{marker::PhantomData, ops::Sub, f64::consts::TAU};
+use std::{marker::PhantomData, ops::Sub, f64::consts::TAU, mem};
 
 use itertools::{Either, Itertools};
 
-use crate::{gcode::{MachineState, Line, CommandContent, LinearMove, HelicalMove, ProbeMove, Orientation}, coordinates::PartialPosition, config::MachineConfiguration, parse::parse_line};
+use crate::{gcode::{MachineState, Line, CommandContent, LinearMove, HelicalMove, ProbeMove, Orientation, ModalUpdates, MotionMode}, coordinates::PartialPosition, config::MachineConfiguration, parse::parse_line, output::MachineFormatter};
 
 #[derive(Debug)]
 pub enum LinesError {
@@ -164,6 +164,43 @@ pub fn gcode_file_to_lines(
         }
     }).collect()
 }
+pub fn gcode_file_to_linear(
+    config: &MachineConfiguration,
+    mut state: MachineState,
+    lines_configuration: &LinesConfiguration,
+    input: &str,
+) -> Result<String, usize> {
+    input.lines().enumerate().map(|(index, line)| {
+        if line.trim_start().starts_with("(") || line.trim_start().starts_with("M") || line.trim() == "" {
+            Ok(format!("{}\n", line))
+        } else {
+            let parsed_line = match parse_line(config, line) {
+                Some(parsed_line) => parsed_line,
+                None => return Err(index),
+            };
+            if matches!(parsed_line.command, Some(CommandContent::HelicalMove(_))) {
+                let points = match lines_configuration.lines(&state, &parsed_line) {
+                    Ok(points) => points.fuse(),
+                    Err(_) => return Err(index),
+                };
+                state.update_by(&parsed_line);
+                let mut modal_updates = parsed_line.modal_updates.clone();
+                Ok(points.map(|point| {
+                    modal_updates.motion_mode = Some(MotionMode::Controlled);
+                    let modal_updates = mem::replace(&mut modal_updates, ModalUpdates::default());
+                    format!("{}\n", MachineFormatter(config, &Line {
+                        modal_updates,
+                        command: Some(CommandContent::LinearMove(LinearMove(point)))
+                    }))
+                }).join(""))
+            } else {
+                state.update_by(&parsed_line);
+                Ok(format!("{}\n", line))
+            }
+        }
+    }).collect()
+}
+
 
 #[cfg(test)]
 pub mod test {
@@ -288,5 +325,27 @@ pub mod test {
         ];
         assert!(are_close(&expected, &result));
     }
-
+    #[test]
+    pub fn test_arc_string() {
+        let config = &MachineConfiguration::standard_3_axis();
+        let input = r"
+(Bob)
+G17
+G0 X10 Y0 Z10
+G2 I-10 X-10 Z0 F1000
+";
+        let machine = MachineState::new(3);
+        let lines_configuration = LinesConfiguration {
+            tolerance: 9.0,
+            arc_radii_tolerance: 0.01,
+        };
+        let result = gcode_file_to_linear(config, machine.clone(), &lines_configuration, input).unwrap();
+        assert_eq!(result, r"
+(Bob)
+G17
+G0 X10 Y0 Z10
+G1 X0.000 Y-10.000 Z5.000 F1000.000
+G1 X-10.000 Y0.000 Z0.000
+")
+    }
 }

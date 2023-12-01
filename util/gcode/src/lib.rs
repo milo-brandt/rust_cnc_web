@@ -16,6 +16,7 @@ pub mod parse;
 /// Utilities for transforming GCode files into series of line segments.
 pub mod lines;
 pub mod tag;
+pub mod measure;
 
 // pub fn transform_gcode_file(
 //     config: &MachineConfiguration,
@@ -84,3 +85,6 @@ pub mod tag;
 //         ).unwrap())
 //     }
 // }
+
+// We need some notion of a GCode program... possible supporting the idea that some are linear or simple?
+// Perhaps better separation of geometrical + other. (e.g. "GCode is a list of shapes + feedrates, with unknown markers interspersed")

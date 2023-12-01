@@ -1,6 +1,6 @@
-use itertools::Either;
+use itertools::{Either, Itertools};
 
-use crate::{gcode::{MachineState, Line, CommandContent, LinearMove, HelicalMove, ModalUpdates, MotionMode}, coordinates::{ArcPlane, PartialPosition}};
+use crate::{gcode::{MachineState, Line, CommandContent, LinearMove, HelicalMove, ModalUpdates, MotionMode}, coordinates::{ArcPlane, PartialPosition}, config::MachineConfiguration, parse::parse_line, output::MachineFormatter};
 
 #[derive(Copy, Clone, Debug)]
 pub enum TagError {
@@ -10,9 +10,9 @@ pub enum TagError {
 }
 #[derive(Clone, Debug)]
 pub struct Tag {
-    position: (f64, f64),
-    minimum_height: f64,
-    radius: f64,
+    pub position: (f64, f64),
+    pub minimum_height: f64,
+    pub radius: f64,
 }
 pub struct TagApplier {
     is_compensated: bool,
@@ -91,7 +91,10 @@ impl ArcVector {
 
 // end should have more items set than start.
 fn bad_progress_interval(start: PartialPosition, end: PartialPosition, tag: &Tag) -> Result<Interval, TagError> {
-    if start.0[0] == end.0[0] && start.0[1] == end.0[1] && start.0[2].map_or(true, |z| z >= tag.minimum_height) && end.0[2].map_or(true, |z| z >= tag.minimum_height) {
+    if start.0[0] == end.0[0]
+        && start.0[1] == end.0[1]
+        && start.0[2].map_or(true, |z| z >= tag.minimum_height)
+        && end.0[2].map_or(true, |z| z >= tag.minimum_height) {
         // Any vertical-only move is ok as long as we either don't know the height or are above the danger height.
         return Ok(Interval::empty());
     } else if start.0[2].is_some_and(|z| z >= tag.minimum_height) && end.0[2].is_some_and(|z| z >= tag.minimum_height) {
@@ -168,7 +171,7 @@ impl TagApplier {
                     position
                 };
 
-                let bad_interval = bad_progress_interval(pre_machine_state.position.clone(), target.clone(), &self.tag)?;
+                let bad_interval = bad_progress_interval(pre_machine_state.position.clone(), pre_machine_state.position.clone().or(&target), &self.tag)?;
                 let mut lines = Vec::new();
                 let original_feedrate = line.modal_updates.feedrate.or(pre_machine_state.feedrate);
                 let original_mode = line.modal_updates.motion_mode.or(pre_machine_state.motion_mode);
@@ -215,6 +218,7 @@ impl TagApplier {
                 };
                 match bad_interval.0 {
                     Some((min, max)) => {
+                        //println!("COMPENSATING!");
                         // Get to the right start position if not already there.
                         if self.is_compensated {
                             if min > 0.0 {
@@ -292,6 +296,29 @@ impl TagApplier {
         }
     }
 }
+
+pub fn tag_gcode_file(
+    config: &MachineConfiguration,
+    mut state: MachineState,
+    tag: Tag,
+    input: &str,
+) -> Result<String, usize> {
+    let mut tag_applier = TagApplier::new(tag, None);
+    input.lines().enumerate().map(|(index, line)| {
+        if line.trim_start().starts_with("(") || line.trim_start().starts_with("M") || line.trim() == "" {
+            Ok(format!("{}\n", line))
+        } else {
+            let line = match parse_line(config, line) {
+                Some(parsed_line) => parsed_line,
+                None => return Err(index),
+            };
+            let new_lines = tag_applier.apply_to(&state, line.clone()).map_err(|e| index)?;
+            state.update_by(&line);
+            Ok(new_lines.map(|line| format!("{}\n", MachineFormatter(config, &line).to_string())).collect_vec().join(""))
+        }
+    }).collect()
+}
+
 
 #[cfg(test)]
 mod test {
@@ -412,4 +439,33 @@ G1 X4.000 Y6.000 Z3.000
 G1 X7.000 Y6.000 Z4.000
 ".trim())
     }
+
+    #[test]
+    fn apply_to_path_string() {
+        // Cross over at (-2, 6) and (4, 6)
+        let mut state = MachineState::new(3);
+        let config = MachineConfiguration::standard_3_axis();
+        let input = r"
+G0 Z6
+G0 X0 Y0
+G1 Z-5 F1000
+G1 X10
+        ";
+        let tag = tag_gcode_file(&config, state, Tag {
+            position: (5.0, 0.0),
+            minimum_height: 0.0,
+            radius: 2.0
+        }, input).unwrap();
+        assert_eq!(tag.trim(), r"
+G0 Z6.000
+G0 X0.000 Y0.000
+G1 Z-5.000 F1000.000
+G1 X3.000 Y0.000 Z-5.000
+G1 X3.000 Y0.000 Z0.000
+G1 X7.000 Y0.000 Z0.000
+G1 X7.000 Y0.000 Z-5.000
+G1 X10.000
+    ".trim())
+    }
+
 }

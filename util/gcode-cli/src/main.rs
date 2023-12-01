@@ -1,20 +1,48 @@
 use std::collections::HashSet;
 
 use anyhow::{anyhow, Context};
-use clap::Parser;
-use gcode::{simple::transform_gcode_file, config::MachineConfiguration, simple::SimpleTransform, simple::SignedIndex, coordinates::{Offset, Sign}};
+use clap::{Parser, Subcommand, Args};
+use gcode::{simple::transform_gcode_file, config::MachineConfiguration, simple::SimpleTransform, simple::SignedIndex, coordinates::{Offset, Sign}, tag::{Tag, tag_gcode_file}, gcode::MachineState, lines::{LinesConfiguration, gcode_file_to_linear}, measure::estimate_extent};
 use clap_stdin::FileOrStdin;
 use indexmap::IndexMap;
 use serde::{Deserialize, Serialize};
 
-#[derive(Parser, Debug)]
+#[derive(Parser)]
 #[command(author, version, about, long_about = None)]
-struct Args {
+struct CliArgs {
+    #[command(subcommand)]
+    command: Command
+}
+
+#[derive(Subcommand)]
+enum Command {
+    Transform(TransformationCommand),
+    Tag(TagCommand),
+    Bounds(BoundsCommand)
+}
+
+#[derive(Args)]
+struct TransformationCommand {
     /// A JSON description of the transformation to apply. May include 'translation' and 'permutation' fields.
     #[arg()]
     transformation: String,
 
     /// The file to process.
+    #[arg()]
+    name: FileOrStdin,
+}
+
+#[derive(Args)]
+struct TagCommand {
+    #[arg()]
+    tags: String,
+
+    #[arg()]
+    name: FileOrStdin,
+}
+
+#[derive(Args)]
+struct BoundsCommand {
     #[arg()]
     name: FileOrStdin,
 }
@@ -108,23 +136,71 @@ impl<T> OneOrMany<T> {
     }
 }
 
+#[derive(Deserialize)]
+pub struct TagDescription {
+    position: (f64, f64),
+    radius: f64,
+    minimum_height: f64,
+}
+
 fn main() {
-    let args = Args::parse();
-    let transforms = serde_json::from_str::<OneOrMany<TransformationDescription>>(&args.transformation).context("Failed while parsing JSON input").unwrap().to_vec();
-    let machine_config = MachineConfiguration::standard_4_axis();
-    let transforms = transforms
-        .iter()
-        .enumerate()
-        .map(|(index, transform)|
-            description_to_transformation(&machine_config, &transform).context(format!("Provided transformation index {} is invalid.", index))
-        )
-        .collect::<Result<Vec<_>, _>>().unwrap();
+    let args = CliArgs::parse();
+    match args.command {
+        Command::Transform(args) => {
+            let transforms = serde_json::from_str::<OneOrMany<TransformationDescription>>(&args.transformation).context("Failed while parsing JSON input").unwrap().to_vec();
+            let machine_config = MachineConfiguration::standard_4_axis();
+            let transforms = transforms
+                .iter()
+                .enumerate()
+                .map(|(index, transform)|
+                    description_to_transformation(&machine_config, &transform).context(format!("Provided transformation index {} is invalid.", index))
+                )
+                .collect::<Result<Vec<_>, _>>().unwrap();
 
-    let result = transforms.iter().map(|transform| -> anyhow::Result<_> {
-        let result = transform_gcode_file(&machine_config, &transform, &args.name)
-            .map_err(|e| anyhow!("Failed to apply transformation! Error on line {}", e + 1))?;
-        Ok(format!("(START TRANSFORM: {})\n{}(END TRANSFORM)\n", transformation_to_description(&machine_config, transform), result))
-    }).collect::<anyhow::Result<String>>().unwrap();
+            let result = transforms.iter().map(|transform| -> anyhow::Result<_> {
+                let result = transform_gcode_file(&machine_config, &transform, &args.name)
+                    .map_err(|e| anyhow!("Failed to apply transformation! Error on line {}", e + 1))?;
+                Ok(format!("(START TRANSFORM: {})\n{}(END TRANSFORM)\n", transformation_to_description(&machine_config, transform), result))
+            }).collect::<anyhow::Result<String>>().unwrap();
 
-    println!("{}", result);
+            println!("{}", result);
+        }
+        Command::Tag(args) => {
+            let tags = serde_json::from_str::<Vec<TagDescription>>(&args.tags).context("Failed while parsing JSON input").unwrap();
+            let tags: Vec<_> = tags
+                .iter()
+                .map(|tag|
+                    Tag {
+                        position: tag.position,
+                        minimum_height: tag.minimum_height,
+                        radius: tag.radius,
+                    }
+                ).collect();
+            let mut result = gcode_file_to_linear(
+                &MachineConfiguration::standard_4_axis(),
+                MachineState::new(4),
+                &LinesConfiguration {
+                    tolerance: 0.01,
+                    arc_radii_tolerance: 0.01,
+                },
+                &args.name
+            ).map_err(|e| anyhow!("Failed to linearlize line {}", e)).unwrap();
+            for tag in tags {
+                result = tag_gcode_file(
+                    &MachineConfiguration::standard_4_axis(),
+                    MachineState::new(4),
+                    tag,
+                    &result
+                ).map_err(|e| anyhow!("Failed to tag line {}", e)).unwrap();
+            }
+
+            println!("{}", result);
+        }
+        Command::Bounds(args) => {
+            let bounds = estimate_extent(
+                &MachineConfiguration::standard_4_axis(), &args.name
+            ).map_err(|e| anyhow!("Failed on line {}", e)).unwrap();
+            println!("{}", serde_json::to_string_pretty(&bounds.bounds).unwrap())
+        }
+    }
 }
